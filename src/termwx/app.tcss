@@ -1,0 +1,105 @@
+Screen {
+    background: #0d1117;
+    color: #e6edf3;
+}
+
+#topbar {
+    height: 1;
+    background: #161b22;
+}
+
+/* ── alert banner ─────────────────────────────── */
+#banner {
+    display: none;
+    height: 1;
+    padding: 0 1;
+    text-style: bold;
+}
+#banner.-show { display: block; }
+#banner.sev-extreme { background: #ff2d55; color: #ffffff; }
+#banner.sev-severe { background: #d62c1f; color: #ffffff; }
+#banner.sev-moderate { background: #ff9f0a; color: #0d1117; }
+#banner.sev-minor { background: #ffd60a; color: #0d1117; }
+#banner.sev-unknown { background: #6e7681; color: #ffffff; }
+#banner.sev-extreme.-blink { background: #7a0019; }
+#banner.sev-severe.-blink { background: #7d1a12; }
+
+/* ── panels ───────────────────────────────────── */
+.panel {
+    border: round #30363d;
+    border-title-color: #58a6ff;
+    border-title-style: bold;
+    padding: 0 1;
+    height: auto;
+    background: #0d1117;
+}
+
+#body { height: 1fr; }
+#columns { height: auto; }
+#left { width: 1fr; height: auto; }
+#right { width: 48; height: auto; }
+
+#row1 { height: auto; }
+#current { width: 1fr; min-width: 46; max-width: 64; height: 12; }
+#scene { width: 1fr; height: 12; border-title-color: #c9d1d9; }
+
+#alerts.-hot { border: round #ff453a; border-title-color: #ff453a; }
+
+/* medium: single column, space weather below */
+Screen.-narrow #columns { layout: vertical; }
+Screen.-narrow #right { width: 100%; }
+
+/* small: drop the scene, let panels grow */
+Screen.-tiny #scene { display: none; }
+Screen.-tiny #current { width: 1fr; max-width: 100%; min-width: 0; height: auto; }
+
+/* ── location modal ───────────────────────────── */
+LocationScreen, AlertsScreen, HelpScreen {
+    align: center middle;
+    background: #0d1117 70%;
+}
+#location-box {
+    width: 72;
+    max-width: 95%;
+    height: auto;
+    max-height: 90%;
+    border: round #58a6ff;
+    background: #161b22;
+    padding: 1 2;
+}
+#location-title { margin-bottom: 1; }
+#location-input { margin-bottom: 1; }
+#location-options { height: auto; max-height: 16; background: #0d1117; border: none; }
+#location-hint { margin-top: 1; }
+
+/* ── alerts modal ─────────────────────────────── */
+#alerts-box {
+    width: 90%;
+    height: 85%;
+    border: round #ff453a;
+    background: #161b22;
+    padding: 0 1;
+}
+#alerts-title { height: 1; margin-bottom: 1; }
+#alerts-list { width: 34; height: 1fr; background: #0d1117; border: none; }
+#alert-detail-scroll { width: 1fr; height: 1fr; padding: 0 2; }
+
+/* ── space weather screen ─────────────────────── */
+SpaceScreen { background: #0d1117; }
+#space-scroll { height: 1fr; }
+#space-row { height: auto; }
+#space-summary { width: 54; }
+#space-wind { width: 1fr; }
+#space-messages { height: 22; }
+#swpc-list { width: 1fr; height: 100%; background: #0d1117; }
+#swpc-detail-scroll { width: 1fr; height: 100%; }
+
+/* ── help ─────────────────────────────────────── */
+#help-box {
+    width: 64;
+    max-width: 95%;
+    height: auto;
+    border: round #58a6ff;
+    background: #161b22;
+    padding: 1 2;
+}

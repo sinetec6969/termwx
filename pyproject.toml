@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "termwx"
+version = "0.1.0"
+description = "Ultimate terminal weather: conditions, 3-day forecast, NWS alerts and space weather"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "textual>=8.0",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+termwx = "termwx.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+termwx = ["*.tcss", "data/*.json"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
