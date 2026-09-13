@@ -4,17 +4,9 @@ Ultimate terminal weather: live conditions with an animated ASCII sky, 24–36h
 hourly graph, 3-day forecast, NWS severe weather alerts, and a NOAA space
 weather dashboard. No API keys.
 
-```
- termwx  Charlotte, NC  35.23°N 80.84°W  │  Sun Sep 13 11:13a EDT  │  °F  │  ⟳ just now
-  ⚠  SEVERE THUNDERSTORM WARNING  from Sun 11:13a until Sun 11:58a   +1 more   [w] details
-╭─ Now ────────────────────────────────────────────────╮╭─ Partly Cloudy ─────────────╮╭─ Space Weather ─────────────╮
-│ ☁ Partly Cloudy                                      ││    \ | /     .--.           ││ NOAA   G0   S0   R0   quiet │
-│ ▀▀█ █▀█ °F   feels 88°                               ││   ― ( ) ― .-(    ).     v   ││ Kp    2.3 quiet  peak 3.7   │
-│   █ ▀▀█     ↑ 89°  ↓ 73°                             ││    / | \ (___.__)__)        ││ ▄▃▇▄█▄▇▆▄▃▅▄▆█▆▅▓▓▓▓▓▓▅▓▓▓  │
-│   ▀ ▀▀▀     ☂ 12% today                              ││                  ^     /\   ││ Wind  442 km/s  1.5 p/cm³   │
-│ Wind   ↘ WNW 4 mph   Humid  84%  dew 74°             ││                 /^\   /__\  ││ IMF   Bz -1.0  Bt 6.0 nT    │
-│ Press  29.97 inHg ↘  UV     5 Moderate               ││ ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁|▁▁▁▁|▪▪|▁▁ ││ Aurora 0% overhead          │
-```
+![termwx dashboard showing current conditions, animated sky, hourly graph, 3-day forecast, an alert banner and space weather](docs/screenshot.png)
+
+<sub>Live data for Charlotte, NC, launched with <code>--demo-alert</code> to show the alert banner.</sub>
 
 ## Install
 
