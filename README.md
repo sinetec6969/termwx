@@ -6,10 +6,9 @@ alerts, a NOAA space weather dashboard, and an aviation console with METAR/TAF,
 PIREPs, SIGMETs, G-AIRMETs, CWAs, winds aloft and the NWS forecast discussion.
 No API keys.
 
-![termwx dashboard showing current conditions, animated sky, hourly graph, 3-day forecast, an alert banner and space weather](docs/screenshot.png)
+![termwx dashboard showing current conditions, animated sky, hourly graph, 3-day forecast, an alert banner, the aviation panel and space weather](docs/screenshot.png)
 
-<sub>Live data for Charlotte, NC, launched with <code>--demo-alert</code> to show the alert banner.
-This screenshot predates 0.2.0, so it doesn't show the Aviation panel yet.</sub>
+<sub>Live data for Charlotte, NC (0.2.0), launched with <code>--demo-alert</code> to show the alert banner.</sub>
 
 ## Install
 
@@ -250,7 +249,6 @@ run against the live services for Charlotte, Denver and Tampa.
 
 - A NOTAM provider using the FAA API, opt-in through environment variables.
 - Showing TAF icing/turbulence groups and G-AIRMET forecast snapshots.
-- A new screenshot that includes the Aviation panel.
 
 ## Development
 
