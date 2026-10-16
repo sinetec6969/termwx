@@ -25,6 +25,8 @@ class Config:
     desktop_notify: bool = True
     bell: bool = True
     animate: bool = True
+    visitor: bool = True
+    aviation_station: str = ""  # explicit ICAO override; empty = nearest METAR station
     path: Path = field(default_factory=default_path)
 
     @classmethod
@@ -37,9 +39,11 @@ class Config:
             return cfg
         if data.get("units") in (IMPERIAL, METRIC):
             cfg.units = data["units"]
-        for key in ("desktop_notify", "bell", "animate"):
+        for key in ("desktop_notify", "bell", "animate", "visitor"):
             if isinstance(data.get(key), bool):
                 setattr(cfg, key, data[key])
+        if isinstance(data.get("aviation_station"), str):
+            cfg.aviation_station = data["aviation_station"].strip().upper()
         try:
             if "location" in data:
                 cfg.location = Location.from_dict(data["location"])
@@ -55,8 +59,11 @@ class Config:
             f"desktop_notify = {_b(self.desktop_notify)}",
             f"bell = {_b(self.bell)}",
             f"animate = {_b(self.animate)}",
-            "",
+            f"visitor = {_b(self.visitor)}",
         ]
+        if self.aviation_station:
+            lines.append(f"aviation_station = {_q(self.aviation_station)}")
+        lines.append("")
         if self.location:
             lines += ["[location]", *_table(self.location), ""]
         for fav in self.favorites:

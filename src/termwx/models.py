@@ -131,8 +131,11 @@ class Weather:
         return self.days[0] if self.days else None
 
     @property
-    def pressure_trend(self) -> float:
-        """hPa change over the next 3 hours (positive = rising)."""
+    def pressure_forecast_change(self) -> float:
+        """Forecast hPa change over the next 3 hours (positive = rising).
+
+        This is model output, not a measured 3-hour pressure tendency.
+        """
         if len(self.hours) < 4:
             return 0.0
         return self.hours[3].pressure - self.hours[0].pressure
@@ -237,3 +240,41 @@ class SpaceWeather:
     def kp_max_forecast(self) -> KpPoint | None:
         future = [p for p in self.kp if p.kind == "predicted"]
         return max(future, key=lambda p: p.kp) if future else None
+
+
+@dataclass
+class Quip:
+    """Something for the sky visitor's sign: a quote, fact, joke, headline…"""
+
+    kind: str  # header on the sign, e.g. "fun fact"
+    text: str
+    reveal: str = ""  # punchline or answer, shown after a pause
+    credit: str = ""  # author or source
+
+
+@dataclass
+class DiscussionSection:
+    title: str  # e.g. "AVIATION /18Z TUESDAY THROUGH SATURDAY/"
+    body: str
+
+    @property
+    def key(self) -> str:
+        """Leading words of the title, e.g. "AVIATION", "NEAR TERM", "LONG TERM"."""
+        return self.title.split("/", 1)[0].split("...", 1)[0].strip().upper()
+
+
+@dataclass
+class ForecastDiscussion:
+    """An NWS Area Forecast Discussion, kept verbatim."""
+
+    office: str  # WFO identifier, e.g. "GSP"
+    issued: datetime
+    text: str
+    product_id: str = ""
+    sections: list[DiscussionSection] = field(default_factory=list)
+    fetched_at: datetime = field(default_factory=datetime.now)
+    stale: bool = False
+
+    @property
+    def aviation(self) -> DiscussionSection | None:
+        return next((s for s in self.sections if s.key.startswith("AVIATION")), None)

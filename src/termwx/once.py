@@ -10,9 +10,10 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from . import render as R, wmo
-from .api import geo, nws, openmeteo, swpc
+from . import aviation as A, render as R, render_aviation as RA, wmo
+from .api import awc, geo, nws, openmeteo, swpc
 from .api.http import FetchError, Http
+from .aviation_models import AviationResult
 from .config import Config
 from .demo import demo_alerts
 from .models import AlertsResult, Location
@@ -36,9 +37,34 @@ async def resolve_location(http: Http, cfg: Config, query: str | None) -> Locati
     return await geo.autolocate(http)
 
 
-async def snapshot(cfg: Config, query: str | None, units: str, demo: bool = False) -> int:
-    console = Console()
-    http = Http()
+async def fetch_aviation(http: Http, loc: Location, explicit: str | None) -> AviationResult:
+    """Station + METAR/TAF/PIREPs/advisories (and winds) concurrently; each product fails on its own."""
+    choice = await awc.choose_station(http, loc.lat, loc.lon, explicit or None)
+    av = AviationResult(choice=choice)
+    st = choice.station
+    ref = (st.lat, st.lon) if st else (loc.lat, loc.lon)
+    jobs = {"hazards": awc.fetch_hazards(http, *ref), "winds": awc.fetch_winds(http, *ref)}
+    if st:
+        jobs |= {"metars": awc.fetch_metars(http, st.icao), "taf": awc.fetch_taf(http, st.icao), "pireps": awc.fetch_pireps(http, st)}
+    results = await asyncio.gather(*jobs.values(), return_exceptions=True)
+    now = A.utcnow()
+    for name, res in zip(jobs, results):
+        feed = getattr(av, name)
+        if isinstance(res, (FetchError, KeyError, TypeError, ValueError, IndexError)):
+            feed.fail(str(res) or res.__class__.__name__)
+        elif isinstance(res, BaseException):
+            raise res
+        else:
+            feed.ok(res[0], res[1], now)
+    return av
+
+
+async def snapshot(
+    cfg: Config, query: str | None, units: str, demo: bool = False, aviation_detail: bool = False,
+    http: Http | None = None, console: Console | None = None,
+) -> int:
+    console = console or Console()
+    http = http or Http()
     try:
         try:
             loc = await resolve_location(http, cfg, query)
@@ -49,12 +75,13 @@ async def snapshot(cfg: Config, query: str | None, units: str, demo: bool = Fals
             openmeteo.fetch_weather(http, loc, units),
             nws.fetch_alerts(http, loc),
             swpc.fetch_space(http, loc.lat, loc.lon),
+            fetch_aviation(http, loc, cfg.aviation_station),
             return_exceptions=True,
         )
     finally:
         await http.aclose()
 
-    weather, alerts, space = results
+    weather, alerts, space, aviation = results
     width = console.width
 
     title = Text()
@@ -104,5 +131,29 @@ async def snapshot(cfg: Config, query: str | None, units: str, demo: bool = Fals
         bottom.append(_panel(Text(f"space weather unavailable: {space}", style="red"), "Space Weather"))
     else:
         bottom.append(_panel(R.space_panel(space, min(width - 4, 60)), "Space Weather"))
+    if isinstance(aviation, BaseException):
+        bottom.append(_panel(Text(f"aviation unavailable: {aviation}", style="red"), "Aviation"))
+    else:
+        now = A.utcnow()
+        bottom.append(_panel(RA.once_section(aviation, units, now), "Aviation"))
+        if aviation_detail and aviation.station:
+            bottom += aviation_snapshot(aviation, units, width, now)
     console.print(Group(*bottom))
     return 0
+
+
+def aviation_snapshot(av: AviationResult, units: str, width: int, now) -> list:
+    """`--once --aviation`: METAR, TAF timeline, advisories and the closest PIREPs — no full AFD dump."""
+    out = [
+        _panel(RA.metar_panel(av, units, width - 4, now), f"METAR · {av.station.icao}"),
+        _panel(RA.taf_panel(av.taf, av.station.has_taf, now), "TAF"),
+    ]
+    hz = A.relevant_hazards(av.hazards.data.items, now) if av.hazards.data else []
+    cards = [RA.hazard_card(h, now) for h in hz[:6]] or [Text(av.hazards.error or "no advisories within 50 NM", style=R.DIM)]
+    out.append(_panel(Group(*cards), "Advisories"))
+    pireps = A.recent_pireps(av.pireps.data, now)[:8] if av.pireps.data else []
+    lines = [RA.pirep_line(p, now) for p in pireps] or [Text(av.pireps.error or "no recent PIREPs", style=R.DIM)]
+    out.append(_panel(Group(*lines), f"PIREPs · {A.PIREP_RADIUS_NM} NM"))
+    out.append(_panel(RA.winds_panel(av.winds, now), "Winds aloft"))
+    out.append(Text(RA.DISCLAIMER, style=R.DIM))
+    return out

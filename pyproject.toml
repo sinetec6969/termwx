@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "termwx"
-version = "0.1.0"
-description = "Ultimate terminal weather: conditions, 3-day forecast, NWS alerts and space weather"
+version = "0.2.0"
+description = "Terminal weather and aviation console: conditions, forecast, NWS alerts, space weather, METAR/TAF, PIREPs and advisories"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

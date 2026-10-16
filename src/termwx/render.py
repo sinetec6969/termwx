@@ -133,7 +133,8 @@ def current_panel(w: Weather, width: int = 60) -> RenderableType:
     if c.wind_gust > c.wind_speed + 3:
         wind.append(f" g{round(c.wind_gust)}", style="#ff9f43" if c.wind_gust >= (40 if u == U.IMPERIAL else 64) else DIM)
 
-    trend = w.pressure_trend
+    # Forecast change over the next 3h, not an observed tendency, so it is labelled "fcst".
+    trend = w.pressure_forecast_change
     arrow, tstyle = ("→", DIM)
     if trend > 0.7:
         arrow, tstyle = ("↗", "#9be15d")
@@ -141,6 +142,8 @@ def current_panel(w: Weather, width: int = 60) -> RenderableType:
         arrow, tstyle = ("↘", "#ff9f43")
     press = Text(U.pressure(c.pressure, u), style="#e6edf3")
     press.append(f" {arrow}", style=tstyle)
+    if width >= 52:
+        press.append(" fcst", style=DIM)
 
     uv_txt, uv_style = U.uv_label(c.uv)
     aqi_txt, aqi_style = U.aqi_label(w.aqi)

@@ -1,17 +1,31 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
+from termwx import aviation
 from termwx.api.http import FetchError
 
 FIXTURES = Path(__file__).parent / "fixtures"
+# The AWC/NWS aviation fixtures were recorded around this time.
+FIXTURE_NOW = datetime(2026, 10, 7, 16, 10, tzinfo=timezone.utc)
 
 
 def load(name: str):
     return json.loads((FIXTURES / name).read_text())
+
+
+def load_text(name: str) -> str:
+    return (FIXTURES / name).read_text()
+
+
+@pytest.fixture(autouse=True)
+def pinned_aviation_clock(monkeypatch):
+    """Ages, validity windows and expiry are computed against the fixtures' recording time."""
+    monkeypatch.setattr(aviation, "utcnow", lambda: FIXTURE_NOW)
 
 
 ROUTES = [
@@ -28,6 +42,22 @@ ROUTES = [
     ("10cm-flux.json", "f107.json"),
     ("products/alerts.json", "swpc_alerts.json"),
     ("ovation_aurora_latest.json", "aurora.json"),
+    ("aviationweather.gov/api/data/stationinfo", "awc_stationinfo.json"),
+    ("aviationweather.gov/api/data/airport", "awc_airport.json"),
+    ("aviationweather.gov/api/data/metar", "awc_metar.json"),
+    ("aviationweather.gov/api/data/taf", "awc_taf.json"),
+    ("aviationweather.gov/api/data/pirep", "awc_pirep.json"),
+    ("aviationweather.gov/api/data/airsigmet", "awc_airsigmet.json"),
+    ("aviationweather.gov/api/data/isigmet", "awc_isigmet.json"),
+    ("aviationweather.gov/api/data/gairmet", "awc_gairmet.json"),
+    ("aviationweather.gov/api/data/airmet", "awc_airmet_ak.geojson.json"),
+    ("aviationweather.gov/api/data/cwa", "awc_cwa.json"),
+    ("api.weather.gov/points/", "nws_points.json"),
+    ("api.weather.gov/products/types/AFD", "nws_afd_list.json"),
+    ("api.weather.gov/products/", "nws_afd.json"),
+]
+TEXT_ROUTES = [
+    ("aviationweather.gov/api/data/windtemp", "awc_windtemp_us.txt"),
 ]
 
 
@@ -52,6 +82,27 @@ class FakeHttp:
                 return load(fixture), False
         raise FetchError(f"no fixture for {url}")
 
+    async def get_text(self, url, params=None, headers=None):
+        self.calls.append((url, params))
+        for needle, value in self.overrides.items():
+            if needle in url:
+                if isinstance(value, Exception):
+                    raise value
+                return value
+        raise FetchError(f"no fixture for {url}")
+
+    async def get_text_cached(self, url, params=None, headers=None):
+        self.calls.append((url, params))
+        for needle, value in self.overrides.items():
+            if needle in url:
+                if isinstance(value, Exception):
+                    raise value
+                return value or "", False
+        for needle, fixture in TEXT_ROUTES:
+            if needle in url:
+                return load_text(fixture), False
+        raise FetchError(f"no fixture for {url}")
+
     async def aclose(self):
         pass
 
@@ -61,4 +112,4 @@ def fake_http():
     return FakeHttp()
 
 
-__all__ = ["FakeHttp", "FetchError", "load"]
+__all__ = ["FIXTURE_NOW", "FakeHttp", "FetchError", "load", "load_text"]

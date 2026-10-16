@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import random
 import shutil
 
 from rich.markup import escape
@@ -10,22 +11,35 @@ from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
+from textual.css.query import NoMatches
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.widgets import Footer, Static
 
-from . import render as R, units as U, wmo
-from .api import geo, nws, openmeteo, swpc
+from rich.console import Group
+
+from . import aviation as A, render as R, render_aviation as RA, units as U, wmo
+from .api import awc, faa_notam, geo, nws, openmeteo, quips, swpc
 from .api.http import FetchError, Http
+from .aviation_models import AviationResult, StationChoice
 from .config import Config
 from .demo import demo_alerts
-from .models import Alert, AlertsResult, Location, SpaceWeather, Weather
+from .models import Alert, AlertsResult, ForecastDiscussion, Location, SpaceWeather, Weather
 from .scene import SceneState
 from .screens import AUTO, AlertsScreen, HelpScreen, LocationScreen, SpaceScreen
+from .screens_aviation import AviationScreen, DiscussionScreen
 from .widgets import AlertBanner, DataPanel, ScenePanel
 
 WEATHER_EVERY = 600
 ALERTS_EVERY = 120
 SPACE_EVERY = 300
+# Aviation products refresh independently; station metadata only on location/station change.
+METAR_EVERY = 300
+TAF_EVERY = 600
+HAZARDS_EVERY = 300  # SIGMET / G-AIRMET / CWA and PIREPs
+WINDS_EVERY = 1800  # FD winds aloft are issued four times a day
+AFD_EVERY = 1200
+AV_ERRORS = (FetchError, KeyError, TypeError, ValueError, IndexError)
+VISITOR_MIN, VISITOR_MAX = 500, 900  # seconds between sky visitors, picked at random
 
 WIDE = 120
 TINY = 76
@@ -56,11 +70,14 @@ class TermWx(App):
         Binding("u", "units", "°F/°C"),
         Binding("w", "alerts", "Alerts"),
         Binding("x", "space", "Space Wx"),
+        Binding("v", "aviation", "Aviation"),
+        Binding("d", "discussion", "Discussion"),
         Binding("s", "favorite", "Save ★"),
         Binding("f", "next_favorite", "Next ★"),
         Binding("a", "autolocate", "Auto-locate", show=False),
         Binding("r", "refresh", "Refresh"),
         Binding("p", "toggle_animation", "Pause anim", show=False),
+        Binding("V", "visitor", "Visitor", show=False),
         Binding("question_mark", "help", "Help"),
         Binding("q", "quit", "Quit"),
     ]
@@ -86,6 +103,13 @@ class TermWx(App):
         self.all_alerts: list[Alert] = []
         self.seen_alert_ids: set[str] = set()
         self.errors: dict[str, str] = {}
+        self.aviation = AviationResult()
+        self.discussion: ForecastDiscussion | None = None
+        self.discussion_error = ""
+        self.office: str | None = None
+        self._office_loc: Location | None = None
+        self.runway: tuple[str, int | None] = ("", None)  # (designator, magnetic heading)
+        self._runway_auto = True
 
     # ── layout ───────────────────────────────────────────────────────────────
     def compose(self) -> ComposeResult:
@@ -100,17 +124,24 @@ class TermWx(App):
                     yield DataPanel(R.hourly_panel, "loading hourly…", "Next hours", id="hourly")
                     yield DataPanel(R.forecast_panel, "loading forecast…", "3-Day Forecast", id="forecast")
                 with Vertical(id="right"):
-                    yield DataPanel(lambda d, w: R.alerts_summary(d), "checking alerts…", "NWS Alerts", id="alerts")
+                    yield DataPanel(self._render_alerts, "checking alerts…", "NWS Alerts", id="alerts")
+                    yield DataPanel(self._render_aviation, "finding aviation station…", "Aviation  v", id="aviation")
                     yield DataPanel(R.space_panel, "fetching space weather…", "Space Weather", id="space")
         yield Footer()
 
     def on_mount(self) -> None:
         self._apply_size_classes(self.size.width)
         self.update_topbar()
-        self.set_interval(15, self.update_topbar)
+        self.set_interval(15, self._tick)
         self.set_interval(WEATHER_EVERY, lambda: self.load_weather())
         self.set_interval(ALERTS_EVERY, lambda: self.load_alerts())
         self.set_interval(SPACE_EVERY, lambda: self.load_space())
+        self.set_interval(METAR_EVERY, self._metar_due)
+        self.set_interval(TAF_EVERY, lambda: self.load_taf())
+        self.set_interval(HAZARDS_EVERY, self._refresh_hazards)
+        self.set_interval(WINDS_EVERY, lambda: self.load_winds())
+        self.set_interval(AFD_EVERY, lambda: self.load_discussion())
+        self._schedule_visitor()
         self.startup()
 
     def on_resize(self, event) -> None:
@@ -152,12 +183,19 @@ class TermWx(App):
         if changed:
             self.weather = None
             self.alerts_result = None
+            self.discussion, self.discussion_error = None, ""
             for pid in ("current", "hourly", "forecast", "alerts"):
                 self.query_one(f"#{pid}", DataPanel).set_data(None)
+            self._reset_aviation()
         self.update_topbar()
         self.load_weather()
         self.load_alerts()
         self.load_space()
+        if changed or self.aviation.choice is None:
+            self.resolve_station()
+        else:
+            self.refresh_aviation()
+        self.load_discussion()
 
     def _save(self) -> None:
         if self.save_config:
@@ -220,6 +258,204 @@ class TermWx(App):
         self.query_one("#space", DataPanel).set_data(sw)
         self.refresh_alerts()
 
+    # ── aviation ─────────────────────────────────────────────────────────────
+    def _reset_aviation(self) -> None:
+        self.aviation = AviationResult()
+        self.runway, self._runway_auto = ("", None), True
+        self._aviation_changed()
+
+    @work(exclusive=True, group="av-station")
+    async def resolve_station(self) -> None:
+        """Pick the aviation station for this location (explicit override or nearest METAR site).
+
+        Runs on location or station change only, never on the refresh cycle."""
+        loc = self.location
+        if loc is None:
+            return
+        explicit = self.config.aviation_station or None
+        try:
+            choice = await awc.choose_station(self.http, loc.lat, loc.lon, explicit)
+        except AV_ERRORS as e:
+            choice = StationChoice(None, "explicit" if explicit else "auto", error=str(e) or e.__class__.__name__,
+                                   retryable=True)
+        if not loc.same_place(self.location) or explicit != (self.config.aviation_station or None):
+            return
+        self.aviation = AviationResult(choice=choice, notam_status=faa_notam.status())
+        self.runway, self._runway_auto = ("", None), True
+        self._aviation_changed()
+        self._load_aviation_products()
+
+    def refresh_aviation(self, announce: bool = False) -> None:
+        if announce:
+            self.notify("Refreshing aviation data…", timeout=2)
+        choice = self.aviation.choice
+        if choice is None or (choice.station is None and choice.retryable):
+            self.resolve_station()  # discovery failed on the network earlier; try again
+            return
+        self._load_aviation_products()
+
+    def _load_aviation_products(self) -> None:
+        self.load_metar()
+        self.load_taf()
+        self._refresh_hazards()
+        self.load_winds()
+
+    def _metar_due(self) -> None:
+        choice = self.aviation.choice
+        if choice is not None and choice.station is None and choice.retryable:
+            self.resolve_station()  # came up offline: try discovery again
+        else:
+            self.load_metar()
+
+    def _refresh_hazards(self) -> None:
+        self.load_pireps()
+        self.load_hazards()
+
+    def _aviation_ref(self) -> tuple[float, float] | None:
+        st = self.aviation.station
+        if st:
+            return st.lat, st.lon
+        return (self.location.lat, self.location.lon) if self.location else None
+
+    async def _fetch_into(self, av: AviationResult, attr: str, fetch) -> bool:
+        """Run one product fetch into its own feed. Failures stay local to that product."""
+        feed = getattr(av, attr)
+        try:
+            data, stale = await fetch()
+        except AV_ERRORS as e:
+            if av is self.aviation:
+                feed.fail(str(e) or e.__class__.__name__)
+                self._aviation_changed()
+            return False
+        if av is not self.aviation:
+            return False
+        feed.ok(data, stale, A.utcnow())
+        self._aviation_changed()
+        return True
+
+    @work(exclusive=True, group="av-metar")
+    async def load_metar(self) -> None:
+        av, st = self.aviation, self.aviation.station
+        if st is None:
+            return
+        if await self._fetch_into(av, "metars", lambda: awc.fetch_metars(self.http, st.icao)):
+            if self._runway_auto:
+                self._auto_runway()
+
+    @work(exclusive=True, group="av-taf")
+    async def load_taf(self) -> None:
+        av, st = self.aviation, self.aviation.station
+        if st is None:
+            return
+        await self._fetch_into(av, "taf", lambda: awc.fetch_taf(self.http, st.icao))
+
+    @work(exclusive=True, group="av-pirep")
+    async def load_pireps(self) -> None:
+        av, st = self.aviation, self.aviation.station
+        if st is None:
+            return
+        await self._fetch_into(av, "pireps", lambda: awc.fetch_pireps(self.http, st))
+
+    @work(exclusive=True, group="av-hazards")
+    async def load_hazards(self) -> None:
+        av, ref = self.aviation, self._aviation_ref()
+        if ref is None or av.choice is None:
+            return
+        await self._fetch_into(av, "hazards", lambda: awc.fetch_hazards(self.http, *ref))
+
+    @work(exclusive=True, group="av-winds")
+    async def load_winds(self) -> None:
+        av, ref = self.aviation, self._aviation_ref()
+        if ref is None or av.choice is None:
+            return
+        await self._fetch_into(av, "winds", lambda: awc.fetch_winds(self.http, *ref))
+
+    def _aviation_changed(self) -> None:
+        try:
+            self.query_one("#aviation", DataPanel).set_data(self.aviation)
+        except NoMatches:  # a fetch finished while the app was shutting down
+            return
+        if isinstance(self.screen, AviationScreen):
+            self.screen.redraw(keep_list=True)
+
+    def _render_aviation(self, av: AviationResult, width: int):
+        return RA.aviation_summary(av, width, self.config.units)
+
+    def set_aviation_station(self, ident: str) -> None:
+        """Explicit station override; blank or "auto" returns to the nearest METAR station."""
+        ident = ident.strip().upper()
+        self.config.aviation_station = "" if ident in ("", "AUTO") else ident
+        self._save()
+        self._reset_aviation()
+        self.resolve_station()
+
+    # runway selection for the crosswind calculator (session only)
+    def runway_ends(self) -> list[tuple[str, int]]:
+        st = self.aviation.station
+        return [end for r in (st.runways if st else []) for end in r.ends]
+
+    def runway_choice(self) -> tuple[str, int | None]:
+        return self.runway
+
+    def set_runway(self, label: str | None, heading: int | None) -> None:
+        self.runway = (label or "", heading)
+        self._runway_auto = heading is None
+
+    def cycle_runway(self, step: int) -> bool:
+        ends = self.runway_ends()
+        if not ends:
+            return False
+        idx = next((i for i, (lbl, _) in enumerate(ends) if lbl == self.runway[0]), -1)
+        lbl, hdg = ends[(idx + step) % len(ends)] if idx >= 0 else ends[0]
+        self.set_runway(lbl, hdg)
+        return True
+
+    def _auto_runway(self) -> None:
+        """Preselect the published runway end with the most headwind (AWC/FAA runway data only)."""
+        ends, m, st = self.runway_ends(), self.aviation.metar, self.aviation.station
+        if not ends:
+            return
+        if m is None or m.wind_dir is None or not m.wind_speed_kt:
+            self.runway = ends[0]
+            return
+        wdir = A.true_to_magnetic(m.wind_dir, st.magdec if st else None)
+        self.runway = max(ends, key=lambda e: A.wind_components(e[1], wdir, m.wind_speed_kt)[0])
+
+    # ── forecast discussion ──────────────────────────────────────────────────
+    @work(exclusive=True, group="afd")
+    async def load_discussion(self) -> None:
+        loc = self.location
+        if loc is None:
+            return
+        try:
+            if self.office is None or not loc.same_place(self._office_loc):
+                self.office = await nws.fetch_office(self.http, loc)
+                self._office_loc = loc
+            if self.office is None:
+                disc, err = None, "not available outside NWS coverage"
+            else:
+                disc, err = await nws.fetch_discussion(self.http, self.office, self.discussion), ""
+        except AV_ERRORS as e:
+            disc, err = self.discussion, str(e) or e.__class__.__name__
+            if disc is not None:
+                disc.stale = True
+        if not loc.same_place(self.location):
+            return
+        self.discussion, self.discussion_error = disc, err
+        self.query_one("#alerts", DataPanel).redraw()
+        if isinstance(self.screen, DiscussionScreen):
+            self.screen.set_discussion(disc, err)
+
+    def _render_alerts(self, res: AlertsResult, width: int):
+        afd = RA.discussion_indicator(self.discussion, "")
+        return Group(R.alerts_summary(res), afd) if afd.plain else R.alerts_summary(res)
+
+    def _tick(self) -> None:
+        """Keep ages honest: redraw everything that shows "N minutes ago"."""
+        self.update_topbar()
+        self.query_one("#aviation", DataPanel).redraw()
+        self.query_one("#alerts", DataPanel).redraw()
+
     # ── alerts ───────────────────────────────────────────────────────────────
     def refresh_alerts(self) -> None:
         res = self.alerts_result
@@ -265,6 +501,23 @@ class TermWx(App):
             await proc.wait()
         except OSError:
             pass
+
+    # ── sky visitor ──────────────────────────────────────────────────────────
+    def _schedule_visitor(self) -> None:
+        if self.config.visitor:
+            self.set_timer(random.uniform(VISITOR_MIN, VISITOR_MAX), self._visitor_due)
+
+    def _visitor_due(self) -> None:
+        self.send_visitor()
+        self._schedule_visitor()
+
+    @work(exclusive=True, group="visitor")
+    async def send_visitor(self) -> None:
+        scene = self.query_one(ScenePanel)
+        if not scene.can_host_visitor:
+            return
+        quip = await quips.fetch_quip(self.http)
+        scene.launch_visitor(quip)
 
     @on(AlertBanner.Pressed)
     def _banner_pressed(self) -> None:
@@ -328,6 +581,15 @@ class TermWx(App):
         self.load_weather()
         self.load_alerts()
         self.load_space()
+        self.refresh_aviation()
+        self.load_discussion()
+
+    def action_aviation(self) -> None:
+        self.push_screen(AviationScreen())
+
+    def action_discussion(self) -> None:
+        err = self.discussion_error or ("loading…" if self.location else "")
+        self.push_screen(DiscussionScreen(self.discussion, "" if self.discussion else err))
 
     def action_alerts(self) -> None:
         if not self.all_alerts:
@@ -360,6 +622,12 @@ class TermWx(App):
         self.config.animate = not self.config.animate
         self.query_one(ScenePanel).set_animate(self.config.animate)
         self._save()
+
+    def action_visitor(self) -> None:
+        if not self.query_one(ScenePanel).can_host_visitor:
+            self.notify("The sky needs to be visible and animated (p), with no visitor already out", timeout=4)
+            return
+        self.send_visitor()
 
     def action_help(self) -> None:
         self.push_screen(HelpScreen())

@@ -311,7 +311,7 @@ def _resample(values: list[float], n: int) -> list[float]:
 
 
 HELP = """\
-[b #58a6ff]termwx[/] — ultimate terminal weather
+[b #58a6ff]termwx[/] — terminal weather & aviation console
 
 [b]l[/]  change location (search city, ZIP, or lat,lon)
 [b]a[/]  auto-detect location from IP
@@ -320,14 +320,22 @@ HELP = """\
 [b]u[/]  toggle °F / °C
 [b]w[/]  active alert details (also click the banner)
 [b]x[/]  space weather dashboard
+[b]v[/]  aviation: METAR, TAF timeline, PIREPs, SIGMET/G-AIRMET/CWA, winds aloft
+     [dim]in there: c airport · h runway heading · [ ] cycle runways[/dim]
+[b]d[/]  NWS Area Forecast Discussion (aviation section first)
 [b]r[/]  refresh everything now
 [b]p[/]  pause / resume animation
+[b]V[/]  send out the sky visitor now (quotes, facts, jokes, news…)
 [b]q[/]  quit
 
-[dim]Data: Open-Meteo (forecast, AQI, geocoding) · NWS api.weather.gov (alerts)
-NOAA SWPC (space weather) · ipinfo.io (auto-locate)
+[dim]Data: Open-Meteo (forecast, AQI, geocoding) · NWS api.weather.gov (alerts, AFD)
+NOAA SWPC (space weather) · aviationweather.gov (aviation) · ipinfo.io (auto-locate)
 
-Refresh: weather 10m · alerts 2m · space 5m[/dim]
+Refresh: weather 10m · alerts 2m · space 5m · METAR 5m · TAF 10m
+hazards & PIREPs 5m · AFD 20m · winds aloft 30m
+
+Pressure arrow = forecast change over the next 3h, not a measured tendency.
+Aviation data is information only — not an official preflight briefing.[/dim]
 
 [dim]press any key to close[/dim]"""
 

@@ -13,8 +13,8 @@ from textual.widget import Widget
 from textual.widgets import Static
 
 from . import render as R
-from .models import Alert
-from .scene import SceneState, render_scene
+from .models import Alert, Quip
+from .scene import FPS, SceneState, Visitor, render_scene
 
 
 class DataPanel(Static):
@@ -51,16 +51,30 @@ class ScenePanel(Widget):
     def __init__(self, animate: bool = True, **kw):
         super().__init__(**kw)
         self.state: SceneState | None = None
+        self.visitor: Visitor | None = None
         self.animate = animate
         self.border_title = "Sky"
         self.add_class("panel")
 
     def on_mount(self) -> None:
-        self._timer = self.set_interval(1 / 8, self._advance, pause=not self.animate)
+        self._timer = self.set_interval(1 / FPS, self._advance, pause=not self.animate)
 
     def _advance(self) -> None:
         if self.state is not None and self.display:
             self.tick += 1
+            if self.visitor and self.visitor.done(self.tick):
+                self.visitor = None
+
+    @property
+    def can_host_visitor(self) -> bool:
+        return self.state is not None and self.display and self.animate and self.visitor is None
+
+    def launch_visitor(self, quip: Quip) -> bool:
+        if not self.can_host_visitor:
+            return False
+        self.visitor = Visitor(quip, start=self.tick)
+        self.refresh()
+        return True
 
     def set_state(self, state: SceneState, label: str) -> None:
         self.state = state
@@ -70,12 +84,15 @@ class ScenePanel(Widget):
     def set_animate(self, on: bool) -> None:
         self.animate = on
         self._timer.resume() if on else self._timer.pause()
+        if not on:
+            self.visitor = None
+            self.refresh()
 
     def render(self) -> RenderableType:
         if self.state is None:
             return Text("…", style=R.DIM)
         size = self.content_size
-        return render_scene(self.state, size.width, size.height, self.tick)
+        return render_scene(self.state, size.width, size.height, self.tick, self.visitor)
 
 
 class AlertBanner(Static):

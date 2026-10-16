@@ -103,3 +103,42 @@ SpaceScreen { background: #0d1117; }
     background: #161b22;
     padding: 1 2;
 }
+
+/* ── aviation screen ──────────────────────────── */
+AviationScreen, DiscussionScreen { background: #0d1117; }
+#av-header, #afd-header { height: 1; background: #161b22; padding: 0 1; }
+#av-scroll { height: 1fr; }
+.av-row { height: auto; }
+#av-metar { width: 3fr; min-width: 50; }
+#av-tools { width: 2fr; min-width: 40; }
+#av-row2 { height: 20; }
+#av-hazards { width: 3fr; height: 100%; background: #0d1117; }
+#av-detail-scroll { width: 2fr; height: 100%; }
+#av-winds { width: 3fr; }
+#av-notes { width: 2fr; }
+
+/* narrow: stack every row */
+AviationScreen.-narrow .av-row { layout: vertical; }
+AviationScreen.-narrow #av-metar, AviationScreen.-narrow #av-tools,
+AviationScreen.-narrow #av-winds, AviationScreen.-narrow #av-notes,
+AviationScreen.-narrow #av-hazards, AviationScreen.-narrow #av-detail-scroll { width: 100%; min-width: 0; }
+AviationScreen.-narrow #av-row2 { height: auto; }
+AviationScreen.-narrow #av-hazards { height: 14; }
+AviationScreen.-narrow #av-detail-scroll { height: 14; }
+
+/* ── forecast discussion ──────────────────────── */
+#afd-body { height: 1fr; }
+#afd-sections { width: 38; height: 100%; background: #0d1117; }
+#afd-text-scroll { width: 1fr; height: 100%; }
+
+/* ── prompt ───────────────────────────────────── */
+PromptScreen { align: center middle; background: #0d1117 70%; }
+#prompt-box {
+    width: 64;
+    max-width: 95%;
+    height: auto;
+    border: round #58a6ff;
+    background: #161b22;
+    padding: 1 2;
+}
+#prompt-title, #prompt-input { margin-bottom: 1; }

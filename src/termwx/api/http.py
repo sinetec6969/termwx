@@ -10,7 +10,8 @@ from typing import Any
 
 import httpx
 
-USER_AGENT = "termwx/0.1 (terminal weather; https://github.com/termwx)"
+# NOAA/NWS and the Aviation Weather Center ask for a descriptive, contactable User-Agent.
+USER_AGENT = "termwx/0.2 (terminal weather; https://github.com/sinetec6969/termwx)"
 
 
 class FetchError(Exception):
@@ -43,16 +44,29 @@ class Http:
     async def get_json(
         self, url: str, params: dict | None = None, headers: dict | None = None, cache: bool = True
     ) -> tuple[Any, bool]:
-        """Return (data, stale). Falls back to the last cached copy on network errors."""
+        """Return (data, stale). Falls back to the last cached copy on network errors.
+
+        HTTP 204 (a valid request with nothing to return, e.g. no recent METAR)
+        comes back as (None, False).
+        """
+        return await self._get(url, params, headers, cache, lambda r: r.json())
+
+    async def get_text_cached(self, url: str, params: dict | None = None, headers: dict | None = None) -> tuple[str, bool]:
+        """Like get_json for plain-text products (e.g. the winds-aloft bulletin); 204 gives ("", False)."""
+        text, stale = await self._get(url, params, headers, True, lambda r: r.text)
+        return text or "", stale
+
+    async def _get(self, url, params, headers, cache, decode) -> tuple[Any, bool]:
         path = self._cache_path(url, params)
         try:
             resp = await self.client.get(url, params=params, headers=headers)
             if resp.status_code >= 400:
                 raise FetchError(f"HTTP {resp.status_code} from {httpx.URL(url).host}", resp.status_code)
-            data = resp.json()
+            data = None if resp.status_code == 204 else decode(resp)
         except FetchError as e:
             # 4xx means the request itself is wrong; a cached copy won't help.
-            if e.status and e.status < 500:
+            # 429 (rate limited) is temporary, so treat it like an outage.
+            if e.status and e.status < 500 and e.status != 429:
                 raise
             return self._from_cache(path, e)
         except (httpx.HTTPError, ValueError) as e:
@@ -66,6 +80,16 @@ class Http:
             except OSError:
                 pass
         return data, False
+
+    async def get_text(self, url: str, params: dict | None = None, headers: dict | None = None) -> str:
+        """Fetch a non-JSON body (e.g. RSS). Not cached."""
+        try:
+            resp = await self.client.get(url, params=params, headers=headers)
+        except httpx.HTTPError as e:
+            raise FetchError(str(e) or e.__class__.__name__) from e
+        if resp.status_code >= 400:
+            raise FetchError(f"HTTP {resp.status_code} from {httpx.URL(url).host}", resp.status_code)
+        return resp.text
 
     def _from_cache(self, path: Path, err: Exception) -> tuple[Any, bool]:
         try:

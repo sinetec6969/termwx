@@ -7,11 +7,15 @@ animate it and the --once snapshot can print a single frame.
 from __future__ import annotations
 
 import math
+import textwrap
 from dataclasses import dataclass
 
 from rich.text import Text
 
 from . import wmo
+from .models import Quip
+
+FPS = 8
 
 SUN_FRAMES = [
     [r"  \ | /  ", r" ― ( ) ― ", r"  / | \  "],
@@ -22,6 +26,22 @@ CLOUD_BIG = [r"    .--.    ", r" .-(    ).  ", r"(___.__)__) "]
 CLOUD_SMALL = [r"  .-.    ", r" (   ).  ", r"(___(__) "]
 HOUSE = [r"  /\  ", r" /__\ ", r" |▪▪| "]
 TREE = [r" ^ ", r"/^\ ", r" | "]
+RUNNER = [[r" o ", r"/|\ ", r"/ \ "], [r" o ", r"<|\ ", r" |\ "]]
+HOLDER = [[r"\o/", r" | ", r"/ \ "], [r"\o/", r" | ", r" | "]]
+
+# sky visitor timings, in ticks
+RUN_IN = 3 * FPS
+RUN_OUT = 2 * FPS
+SIGN_POP = 4
+SIGN_MAX_W = 44
+SIGN_BOARD = "#e8d9b5"
+SIGN_BORDER = f"#8b5e34 on {SIGN_BOARD}"
+SIGN_HEADER = f"bold #8b5e34 on {SIGN_BOARD}"
+SIGN_TEXT = f"bold #1c1917 on {SIGN_BOARD}"
+SIGN_REVEAL = f"bold #b42318 on {SIGN_BOARD}"
+SIGN_CREDIT = f"italic #6b5a45 on {SIGN_BOARD}"
+VISITOR_BODY = "bold #ff7b72"
+VISITOR_HEAD = "bold #ffd8b0"
 
 
 @dataclass
@@ -38,6 +58,31 @@ class SceneState:
         cond = wmo.condition(code)
         kmh = wind_speed * 1.609 if units == "imperial" else wind_speed
         return cls(cond.scene, cond.intensity, is_day, kmh, wind_dir, cloud_cover)
+
+
+@dataclass
+class Visitor:
+    """A little character who runs out of the house, holds up a sign, and runs off."""
+
+    quip: Quip
+    start: int = 0
+
+    @property
+    def reveal_at(self) -> int:
+        """Ticks into the hold before the punchline appears."""
+        return int(FPS * (3 + len(self.quip.text) / 15)) if self.quip.reveal else 0
+
+    @property
+    def hold(self) -> int:
+        q = self.quip
+        return self.reveal_at + int(FPS * (4 + (len(q.reveal) + len(q.credit) + (0 if q.reveal else len(q.text))) / 15))
+
+    @property
+    def duration(self) -> int:
+        return RUN_IN + self.hold + RUN_OUT
+
+    def done(self, tick: int) -> bool:
+        return tick - self.start >= self.duration
 
 
 def _rand(i: int) -> float:
@@ -89,7 +134,88 @@ class Canvas:
         return out
 
 
-def render_scene(state: SceneState, width: int, height: int, tick: int) -> Text:
+def _draw_figure(cv: Canvas, x: int, y: int, frame: list[str]) -> None:
+    cv.sprite(x, y, frame, VISITOR_BODY, opaque=False)
+    cv.put(x + 1, y, "o", VISITOR_HEAD)
+
+
+def _sign_lines(q: Quip, inner: int, revealed: bool) -> list[tuple[str, str]]:
+    lines = [(line, SIGN_TEXT) for line in textwrap.wrap(q.text, inner)]
+    if q.reveal and revealed:
+        lines += [(line, SIGN_REVEAL) for line in textwrap.wrap(q.reveal, inner)]
+    if q.credit:
+        lines += [(line, SIGN_CREDIT) for line in textwrap.wrap(f"— {q.credit}", inner)]
+    return lines
+
+
+def _draw_sign(cv: Canvas, v: Visitor, t: int, center: int, bottom: int) -> None:
+    """Sign whose bottom edge sits on row `bottom`; `t` is ticks into the hold."""
+    inner_max = min(cv.w, SIGN_MAX_W) - 4
+    rows_max = bottom - 1
+    if inner_max < 6 or rows_max < 1:
+        return
+    q = v.quip
+    full = _sign_lines(q, inner_max, revealed=True)
+    header = q.kind[: inner_max - 2]
+    inner = max(max(len(s) for s, _ in full), len(header) + 2)
+    rows = min(len(full), rows_max)
+    revealed = t >= v.reveal_at
+    lines = _sign_lines(q, inner_max, revealed)
+
+    # scroll long text through the window as the reader goes, and make sure a
+    # freshly revealed punchline is on screen
+    offset = 0
+    overflow = len(lines) - rows
+    if overflow > 0:
+        progress = (t - 2 * FPS) / max(1, v.hold - 4 * FPS)
+        offset = round(overflow * min(1.0, max(0.0, progress)))
+        if revealed and q.reveal:
+            first_reveal = len(textwrap.wrap(q.text, inner_max))
+            offset = max(offset, first_reveal + 1 - rows)
+        offset = min(offset, overflow)
+    shown = lines[offset : offset + rows]
+
+    sign_w = inner + 4
+    left = min(max(0, center - sign_w // 2), cv.w - sign_w)
+    top = bottom - rows - 1
+    # pop up from the hands
+    visible_top = bottom - (rows + 2) * (t + 1) // SIGN_POP + 1 if t < SIGN_POP else top
+
+    def row(y: int, chars: str, styles: list[str]) -> None:
+        if y >= max(top, visible_top):
+            for dx, (ch, st) in enumerate(zip(chars, styles)):
+                cv.put(left + dx, y, ch, st)
+
+    title = f" {header} "
+    border_top = "╭─" + title + "─" * (sign_w - 3 - len(title)) + "╮"
+    row(top, border_top, [SIGN_BORDER, SIGN_BORDER] + [SIGN_HEADER] * len(title) + [SIGN_BORDER] * (sign_w - 2 - len(title)))
+    for i in range(rows):
+        text, style = shown[i] if i < len(shown) else ("", SIGN_TEXT)
+        text = text.rjust(inner) if style == SIGN_CREDIT else text.center(inner)
+        row(top + 1 + i, "│ " + text + " │", [SIGN_BORDER, SIGN_BORDER] + [style] * inner + [SIGN_BORDER, SIGN_BORDER])
+    row(bottom, "╰" + "─" * (sign_w - 2) + "╯", [SIGN_BORDER] * sign_w)
+
+
+def _draw_visitor(cv: Canvas, v: Visitor, tick: int, ground: int, door: int) -> None:
+    t = tick - v.start
+    y = ground - 2
+    stop = max(0, min((cv.w - 3) // 2, door - 10))  # mid-sky, but clear of the tree
+    if t < 0:
+        return
+    if t < RUN_IN:
+        _draw_figure(cv, round(door + (stop - door) * t / RUN_IN), y, RUNNER[(t // 2) % 2])
+        return
+    t -= RUN_IN
+    if t < v.hold:
+        _draw_sign(cv, v, t, stop + 1, ground - 3)
+        _draw_figure(cv, stop, y, HOLDER[(t // FPS) % 2])
+        return
+    t -= v.hold
+    if t < RUN_OUT:
+        _draw_figure(cv, round(stop + (-4 - stop) * t / RUN_OUT), y, RUNNER[(t // 2) % 2])
+
+
+def render_scene(state: SceneState, width: int, height: int, tick: int, visitor: Visitor | None = None) -> Text:
     w, h = max(10, width), max(5, height)
     cv = Canvas(w, h)
     scene = state.scene
@@ -239,4 +365,6 @@ def render_scene(state: SceneState, width: int, height: int, tick: int) -> Text:
         if snow_ground:
             cv.put(hx + 2, ground - 3, "_", "#e6edf3")
             cv.put(hx + 3, ground - 3, "_", "#e6edf3")
+    if visitor is not None and h >= 6:
+        _draw_visitor(cv, visitor, tick, ground, door=w - 7 if w >= 24 else w)
     return cv.to_text()

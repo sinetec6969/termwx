@@ -193,6 +193,41 @@ async def test_http_4xx_raises_with_status(tmp_path):
     await http.aclose()
 
 
+async def test_http_204_is_empty_success(tmp_path):
+    http = Http(cache_dir=tmp_path)
+    http.client = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(204)))
+    assert await http.get_json("https://x.test/no-metar") == (None, False)
+    await http.aclose()
+
+
+async def test_http_429_falls_back_to_cache(tmp_path):
+    status = 200
+
+    def handler(request):
+        return httpx.Response(status, json={"v": 2}) if status == 200 else httpx.Response(status)
+
+    http = Http(cache_dir=tmp_path)
+    http.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    await http.get_json("https://x.test/a")
+    status = 429
+    assert await http.get_json("https://x.test/a") == ({"v": 2}, True)
+    await http.aclose()
+
+
+def test_user_agent_identifies_repo():
+    from termwx.api.http import USER_AGENT
+
+    assert "sinetec6969/termwx" in USER_AGENT and USER_AGENT.startswith("termwx/")
+
+
+def test_pressure_change_is_forecast_labelled():
+    w = openmeteo.parse_forecast(load("openmeteo.json"), CLT, U.IMPERIAL, load("aqi.json"))
+    assert w.pressure_forecast_change == pytest.approx(w.hours[3].pressure - w.hours[0].pressure)
+    console = Console(width=70, record=True, color_system=None)
+    console.print(R.current_panel(w, 60))
+    assert "fcst" in console.export_text()
+
+
 # ── units, wmo, moon ─────────────────────────────────────────────────────────
 def test_units():
     assert U.compass(0) == "N" and U.compass(225) == "SW" and U.compass(359) == "N"

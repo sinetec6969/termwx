@@ -15,17 +15,26 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("-l", "--location", help='place to show: "City, ST", ZIP, or "lat,lon"')
     p.add_argument("-u", "--units", choices=[IMPERIAL, METRIC], help="override saved units")
     p.add_argument("--once", action="store_true", help="print a snapshot and exit (no TUI)")
+    p.add_argument(
+        "--airport",
+        metavar="ICAO",
+        help='aviation station to use instead of the nearest one, e.g. KCLT ("auto" = nearest; saved)',
+    )
+    p.add_argument("--aviation", action="store_true", help="with --once: print a larger aviation snapshot")
     p.add_argument("--demo-alert", action="store_true", help="inject sample alerts to preview alert handling")
     p.add_argument("--no-anim", action="store_true", help="disable the animated scene")
     args = p.parse_args(argv)
 
     cfg = Config.load()
     units = args.units or cfg.units
+    if args.airport:
+        ident = args.airport.strip().upper()
+        cfg.aviation_station = "" if ident == "AUTO" else ident
 
     if args.once:
         from .once import snapshot
 
-        return asyncio.run(snapshot(cfg, args.location, units, demo=args.demo_alert))
+        return asyncio.run(snapshot(cfg, args.location, units, demo=args.demo_alert, aviation_detail=args.aviation))
 
     from .app import TermWx
 
