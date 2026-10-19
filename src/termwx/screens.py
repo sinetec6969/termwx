@@ -323,6 +323,8 @@ HELP = """\
 [b]v[/]  aviation: METAR, TAF timeline, PIREPs, SIGMET/G-AIRMET/CWA, winds aloft
      [dim]in there: c airport · h runway heading · [ ] cycle runways[/dim]
 [b]d[/]  NWS Area Forecast Discussion (aviation section first)
+[b]g[/]  drone go/no-go: Part 107 weather checks + preflight checklist
+     [dim]in there: space tick · + / - window · t altitude · x clear ticks[/dim]
 [b]r[/]  refresh everything now
 [b]p[/]  pause / resume animation
 [b]V[/]  send out the sky visitor now (quotes, facts, jokes, news…)

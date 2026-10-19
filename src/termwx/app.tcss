@@ -126,6 +126,16 @@ AviationScreen.-narrow #av-row2 { height: auto; }
 AviationScreen.-narrow #av-hazards { height: 14; }
 AviationScreen.-narrow #av-detail-scroll { height: 14; }
 
+/* ── drone screen ─────────────────────────────── */
+DroneScreen { background: #0d1117; }
+#drone-header, #drone-foot { height: 1; background: #161b22; padding: 0 1; }
+#drone-body { height: 1fr; }
+#drone-list { width: 3fr; height: 100%; background: #0d1117; }
+#drone-detail-scroll { width: 2fr; height: 100%; }
+DroneScreen.-narrow #drone-body { layout: vertical; }
+DroneScreen.-narrow #drone-list { width: 100%; height: 1fr; }
+DroneScreen.-narrow #drone-detail-scroll { width: 100%; height: 14; }
+
 /* ── forecast discussion ──────────────────────── */
 #afd-body { height: 1fr; }
 #afd-sections { width: 38; height: 100%; background: #0d1117; }

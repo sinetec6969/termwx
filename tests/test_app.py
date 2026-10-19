@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
+import pytest
+
 from conftest import FakeHttp, FetchError
 from termwx import units as U
 from termwx.app import TermWx
@@ -299,3 +303,73 @@ async def test_narrow_aviation_layouts(tmp_path):
         await pilot.press("v")
         await pilot.pause()
         assert not app.screen.has_class("-narrow")
+
+
+# ── drone go/no-go ───────────────────────────────────────────────────────────
+async def test_drone_screen_ticks_and_window(tmp_path):
+    from termwx import drone as D
+    from termwx.screens_drone import DroneScreen
+
+    app = make_app(tmp_path)
+    async with app.run_test(size=(160, 50)) as pilot:
+        await settle(pilot, app)
+        panel = app.query_one("#drone", DataPanel)
+        assert app.drone is not None and panel.data is app.drone
+        assert "CAUTION" in shown(panel) and "preflight 0/10" in shown(panel)  # fixture has a Heat Advisory
+        await pilot.press("g")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, DroneScreen)
+        assert "Daylight" in shown(screen.query_one("#drone-detail"))  # first check is highlighted
+        await pilot.press("space")  # on an automatic check: nothing to tick
+        assert app.drone_ticks == set()
+        await pilot.press("end", "space")
+        await pilot.pause()
+        assert app.drone_ticks == {"pilot"} and app.drone.manual_done == 1
+        assert "DONE" in shown(screen.query_one("#drone-detail"))
+        await pilot.press("enter")
+        assert app.drone_ticks == set()
+        await pilot.press("plus")
+        assert app.config.drone.window_hours == 3
+        assert app.drone.window_end - app.drone.window_start == timedelta(hours=3)
+        for _ in range(20):
+            await pilot.press("plus")
+        assert app.config.drone.window_hours == D.MAX_WINDOW_H
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, DroneScreen)
+        assert "preflight 0/10" in shown(panel)
+
+
+async def test_drone_ticks_reset_on_location_change(tmp_path):
+    app = make_app(tmp_path)
+    async with app.run_test(size=(160, 50)) as pilot:
+        await settle(pilot, app)
+        app.toggle_drone_tick("airspace")
+        assert app.drone.manual_done == 1
+        app.set_location(Location("Denver", 39.74, -104.99, "Colorado", "United States", "US", "America/Denver"))
+        assert app.drone_ticks == set()
+
+
+async def test_drone_panel_can_be_hidden(tmp_path):
+    from textual.css.query import NoMatches
+
+    app = make_app(tmp_path)
+    app.config.drone.panel = False
+    async with app.run_test(size=(160, 50)) as pilot:
+        await settle(pilot, app)
+        with pytest.raises(NoMatches):
+            app.query_one("#drone")
+        assert app.drone is not None  # still scored for the g screen
+
+
+async def test_drone_with_aviation_offline_is_not_go(tmp_path):
+    from termwx import drone as D
+
+    http = FakeHttp({"aviationweather.gov": FetchError("offline")})
+    app = make_app(tmp_path, http=http)
+    async with app.run_test(size=(160, 50)) as pilot:
+        await settle(pilot, app)
+        station = next(i for i in app.drone.items if i.id == "station")
+        assert station.status == D.UNKNOWN
+        assert app.drone.verdict in (D.CAUTION, D.NOGO)

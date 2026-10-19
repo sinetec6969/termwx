@@ -8,6 +8,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .drone import DroneLimits
 from .models import Location
 from .units import IMPERIAL, METRIC
 
@@ -27,6 +28,7 @@ class Config:
     animate: bool = True
     visitor: bool = True
     aviation_station: str = ""  # explicit ICAO override; empty = nearest METAR station
+    drone: DroneLimits = field(default_factory=DroneLimits)
     path: Path = field(default_factory=default_path)
 
     @classmethod
@@ -44,6 +46,8 @@ class Config:
                 setattr(cfg, key, data[key])
         if isinstance(data.get("aviation_station"), str):
             cfg.aviation_station = data["aviation_station"].strip().upper()
+        if isinstance(data.get("drone"), dict):
+            cfg.drone = DroneLimits.from_dict(data["drone"])
         try:
             if "location" in data:
                 cfg.location = Location.from_dict(data["location"])
@@ -64,6 +68,7 @@ class Config:
         if self.aviation_station:
             lines.append(f"aviation_station = {_q(self.aviation_station)}")
         lines.append("")
+        lines += ["[drone]", *(f"{k} = {_v(v)}" for k, v in self.drone.to_dict().items()), ""]
         if self.location:
             lines += ["[location]", *_table(self.location), ""]
         for fav in self.favorites:
@@ -92,6 +97,10 @@ def _q(s: str) -> str:
 
 def _b(v: bool) -> str:
     return "true" if v else "false"
+
+
+def _v(v) -> str:
+    return _b(v) if isinstance(v, bool) else f"{v:g}" if isinstance(v, float) else str(v)
 
 
 def _table(loc: Location) -> list[str]:

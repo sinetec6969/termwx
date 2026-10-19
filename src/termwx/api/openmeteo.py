@@ -17,7 +17,10 @@ CURRENT_VARS = [
     "is_day", "wind_speed_10m", "wind_direction_10m", "wind_gusts_10m", "pressure_msl", "cloud_cover",
     "precipitation", "visibility", "uv_index",
 ]
-HOURLY_VARS = ["temperature_2m", "precipitation_probability", "weather_code", "pressure_msl"]
+HOURLY_VARS = [
+    "temperature_2m", "precipitation_probability", "weather_code", "pressure_msl",
+    "wind_speed_10m", "wind_gusts_10m", "wind_direction_10m", "wind_speed_120m", "visibility", "precipitation",
+]
 DAILY_VARS = [
     "weather_code", "temperature_2m_max", "temperature_2m_min", "precipitation_probability_max",
     "precipitation_sum", "wind_speed_10m_max", "sunrise", "sunset", "uv_index_max",
@@ -45,8 +48,21 @@ def _dt(s: str | None) -> datetime | None:
     return datetime.fromisoformat(s) if s else None
 
 
+def _opt(h: dict, name: str, i: int, scale: float = 1.0) -> float | None:
+    """Optional hourly value: None when the array or the value is missing."""
+    col = h.get(name)
+    v = col[i] if col and i < len(col) else None
+    return None if v is None else float(v) * scale
+
+
+def _to_meters(units: dict | None) -> float:
+    """Open-Meteo reports visibility in feet when imperial precipitation units are requested."""
+    return 0.3048 if (units or {}).get("visibility") == "ft" else 1.0
+
+
 def parse_forecast(data: dict, loc: Location, units: str, aqi: dict | None = None) -> Weather:
     c = data["current"]
+    vis = c.get("visibility")
     current = Current(
         time=datetime.fromisoformat(c["time"]),
         temp=_f(c.get("temperature_2m")),
@@ -61,11 +77,12 @@ def parse_forecast(data: dict, loc: Location, units: str, aqi: dict | None = Non
         pressure=_f(c.get("pressure_msl")),
         cloud_cover=_f(c.get("cloud_cover")),
         precip=_f(c.get("precipitation")),
-        visibility=_f(c.get("visibility"), 20000),
+        visibility=20000.0 if vis is None else float(vis) * _to_meters(data.get("current_units")),
         uv=_f(c.get("uv_index")),
     )
 
     h = data.get("hourly", {})
+    vis_scale = _to_meters(data.get("hourly_units"))
     times = [datetime.fromisoformat(t) for t in h.get("time", [])]
     start_hour = current.time.replace(minute=0, second=0, microsecond=0)
     start = next((i for i, t in enumerate(times) if t >= start_hour), 0)
@@ -76,6 +93,12 @@ def parse_forecast(data: dict, loc: Location, units: str, aqi: dict | None = Non
             precip_prob=_f(h["precipitation_probability"][i]),
             code=int(h["weather_code"][i] or 0),
             pressure=_f(h["pressure_msl"][i]),
+            wind_speed=_opt(h, "wind_speed_10m", i),
+            wind_gust=_opt(h, "wind_gusts_10m", i),
+            wind_dir=_opt(h, "wind_direction_10m", i),
+            wind_120m=_opt(h, "wind_speed_120m", i),
+            visibility=_opt(h, "visibility", i, vis_scale),
+            precip=_opt(h, "precipitation", i),
         )
         for i in range(start, min(start + 48, len(times)))
     ]

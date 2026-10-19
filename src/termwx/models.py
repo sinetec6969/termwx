@@ -98,6 +98,13 @@ class Hour:
     precip_prob: float
     code: int
     pressure: float
+    # Drone checks; None when the forecast didn't include them.
+    wind_speed: float | None = None
+    wind_gust: float | None = None
+    wind_dir: float | None = None
+    wind_120m: float | None = None  # ≈ 400 ft AGL
+    visibility: float | None = None  # meters
+    precip: float | None = None
 
 
 @dataclass

@@ -17,7 +17,7 @@ from textual.widgets import Footer, Static
 
 from rich.console import Group
 
-from . import aviation as A, render as R, render_aviation as RA, units as U, wmo
+from . import aviation as A, drone as D, render as R, render_aviation as RA, render_drone as RD, units as U, wmo
 from .api import awc, faa_notam, geo, nws, openmeteo, quips, swpc
 from .api.http import FetchError, Http
 from .aviation_models import AviationResult, StationChoice
@@ -27,6 +27,7 @@ from .models import Alert, AlertsResult, ForecastDiscussion, Location, SpaceWeat
 from .scene import SceneState
 from .screens import AUTO, AlertsScreen, HelpScreen, LocationScreen, SpaceScreen
 from .screens_aviation import AviationScreen, DiscussionScreen
+from .screens_drone import DroneScreen
 from .widgets import AlertBanner, DataPanel, ScenePanel
 
 WEATHER_EVERY = 600
@@ -72,6 +73,7 @@ class TermWx(App):
         Binding("x", "space", "Space Wx"),
         Binding("v", "aviation", "Aviation"),
         Binding("d", "discussion", "Discussion"),
+        Binding("g", "drone", "Drone"),
         Binding("s", "favorite", "Save ★"),
         Binding("f", "next_favorite", "Next ★"),
         Binding("a", "autolocate", "Auto-locate", show=False),
@@ -110,6 +112,8 @@ class TermWx(App):
         self._office_loc: Location | None = None
         self.runway: tuple[str, int | None] = ("", None)  # (designator, magnetic heading)
         self._runway_auto = True
+        self.drone: D.GoNoGo | None = None
+        self.drone_ticks: set[str] = set()  # manual preflight items, this session and location only
 
     # ── layout ───────────────────────────────────────────────────────────────
     def compose(self) -> ComposeResult:
@@ -126,6 +130,8 @@ class TermWx(App):
                 with Vertical(id="right"):
                     yield DataPanel(self._render_alerts, "checking alerts…", "NWS Alerts", id="alerts")
                     yield DataPanel(self._render_aviation, "finding aviation station…", "Aviation  v", id="aviation")
+                    if self.config.drone.panel:
+                        yield DataPanel(RD.drone_summary, "waiting for weather…", "Drone go/no-go  g", id="drone")
                     yield DataPanel(R.space_panel, "fetching space weather…", "Space Weather", id="space")
         yield Footer()
 
@@ -184,6 +190,7 @@ class TermWx(App):
             self.weather = None
             self.alerts_result = None
             self.discussion, self.discussion_error = None, ""
+            self.drone_ticks.clear()
             for pid in ("current", "hourly", "forecast", "alerts"):
                 self.query_one(f"#{pid}", DataPanel).set_data(None)
             self._reset_aviation()
@@ -224,6 +231,7 @@ class TermWx(App):
         self.weather = w
         for pid in ("current", "hourly", "forecast"):
             self.query_one(f"#{pid}", DataPanel).set_data(w)
+        self._drone_changed()
         c = w.current
         self.query_one(ScenePanel).set_state(
             SceneState.from_weather(c.code, c.is_day, c.wind_speed, c.wind_dir, c.cloud_cover, w.units),
@@ -256,7 +264,7 @@ class TermWx(App):
         self.errors.pop("space", None)
         self.space = sw
         self.query_one("#space", DataPanel).set_data(sw)
-        self.refresh_alerts()
+        self.refresh_alerts()  # also re-evaluates the drone checklist
 
     # ── aviation ─────────────────────────────────────────────────────────────
     def _reset_aviation(self) -> None:
@@ -377,6 +385,7 @@ class TermWx(App):
             return
         if isinstance(self.screen, AviationScreen):
             self.screen.redraw(keep_list=True)
+        self._drone_changed()
 
     def _render_aviation(self, av: AviationResult, width: int):
         return RA.aviation_summary(av, width, self.config.units)
@@ -421,6 +430,42 @@ class TermWx(App):
         wdir = A.true_to_magnetic(m.wind_dir, st.magdec if st else None)
         self.runway = max(ends, key=lambda e: A.wind_components(e[1], wdir, m.wind_speed_kt)[0])
 
+    # ── drone go/no-go ───────────────────────────────────────────────────────
+    def _drone_changed(self) -> None:
+        """Re-score the checklist from whatever data is loaded and redraw the panel and screen."""
+        loc = self.location
+        if loc is None:
+            return
+        res = self.alerts_result
+        if self.demo_alert:
+            res = AlertsResult(demo_alerts() + (res.alerts if res else []))
+        self.drone = D.evaluate(loc, self.weather, res, self.aviation, self.space, self.config.drone,
+                                self.drone_ticks, A.utcnow())
+        try:
+            self.query_one("#drone", DataPanel).set_data(self.drone)
+        except NoMatches:  # panel turned off in config, or shutting down
+            pass
+        if isinstance(self.screen, DroneScreen):
+            self.screen.redraw(keep_list=True)
+
+    def toggle_drone_tick(self, item_id: str) -> None:
+        self.drone_ticks ^= {item_id}
+        self._drone_changed()
+
+    def clear_drone_ticks(self) -> None:
+        self.drone_ticks.clear()
+        self._drone_changed()
+
+    def set_drone_plan(self, window_hours: int | None = None, altitude_ft: int | None = None) -> None:
+        lim = self.config.drone
+        if window_hours is not None:
+            lim.window_hours = window_hours
+        if altitude_ft is not None:
+            lim.altitude_ft = altitude_ft
+        lim.clamped()
+        self._save()
+        self._drone_changed()
+
     # ── forecast discussion ──────────────────────────────────────────────────
     @work(exclusive=True, group="afd")
     async def load_discussion(self) -> None:
@@ -455,6 +500,7 @@ class TermWx(App):
         self.update_topbar()
         self.query_one("#aviation", DataPanel).redraw()
         self.query_one("#alerts", DataPanel).redraw()
+        self._drone_changed()  # twilight and the window move with the clock
 
     # ── alerts ───────────────────────────────────────────────────────────────
     def refresh_alerts(self) -> None:
@@ -471,6 +517,8 @@ class TermWx(App):
         top = (extra + nws_alerts)[:1]
         alerts_panel.set_class(bool(top) and top[0].rank >= 3, "-hot")
         self.query_one(AlertBanner).set_alerts(all_alerts)
+
+        self._drone_changed()
 
         new = [a for a in all_alerts if a.id not in self.seen_alert_ids]
         if new:
@@ -590,6 +638,9 @@ class TermWx(App):
     def action_discussion(self) -> None:
         err = self.discussion_error or ("loading…" if self.location else "")
         self.push_screen(DiscussionScreen(self.discussion, "" if self.discussion else err))
+
+    def action_drone(self) -> None:
+        self.push_screen(DroneScreen())
 
     def action_alerts(self) -> None:
         if not self.all_alerts:

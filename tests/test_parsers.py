@@ -31,6 +31,22 @@ def test_parse_forecast():
     assert w.today.sunrise.hour == 7
 
 
+def test_parse_forecast_drone_hourly_fields():
+    data = load("openmeteo.json")
+    w = openmeteo.parse_forecast(data, CLT, U.IMPERIAL)
+    h = w.hours[0]
+    assert h.wind_speed is not None and h.wind_gust >= h.wind_speed and h.wind_120m is not None
+    # imperial responses report visibility in feet; termwx keeps meters everywhere
+    i = data["hourly"]["time"].index(h.time.isoformat(timespec="minutes"))
+    assert h.visibility == pytest.approx(data["hourly"]["visibility"][i] * 0.3048)
+    assert w.current.visibility == pytest.approx(data["current"]["visibility"] * 0.3048)
+    # older responses without the new arrays still parse
+    for k in ("wind_speed_10m", "wind_gusts_10m", "wind_direction_10m", "wind_speed_120m", "visibility", "precipitation"):
+        del data["hourly"][k]
+    h = openmeteo.parse_forecast(data, CLT, U.IMPERIAL).hours[0]
+    assert h.wind_speed is None and h.wind_120m is None and h.visibility is None
+
+
 def test_forecast_params_units():
     p = openmeteo.forecast_params(CLT, U.METRIC)
     assert p["temperature_unit"] == "celsius" and p["wind_speed_unit"] == "kmh"
@@ -265,6 +281,19 @@ def test_config_roundtrip(tmp_path):
     assert back.location == cfg.location
     assert back.favorites == [CLT]
     assert back.toggle_favorite(CLT) is False and back.favorites == []
+
+
+def test_config_drone_limits_roundtrip(tmp_path):
+    path = tmp_path / "config.toml"
+    cfg = Config(path=path)
+    cfg.drone.max_wind_mph, cfg.drone.altitude_ft, cfg.drone.anticollision_lighting = 17.5, 250, True
+    cfg.save()
+    assert "[drone]" in path.read_text()
+    back = Config.load(path)
+    assert back.drone == cfg.drone
+    path.write_text('[drone]\nmin_visibility_sm = 1\nmax_gust_mph = "lots"\naltitude_ft = 1000\n')
+    lim = Config.load(path).drone
+    assert lim.min_visibility_sm == 3 and lim.max_gust_mph == 25 and lim.altitude_ft == 400
 
 
 def test_config_missing_or_corrupt(tmp_path):

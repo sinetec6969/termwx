@@ -2,9 +2,9 @@
 
 Terminal weather and aviation situational awareness: live conditions with an
 animated ASCII sky, 24–36h hourly graph, 3-day forecast, NWS severe weather
-alerts, a NOAA space weather dashboard, and an aviation console with METAR/TAF,
-PIREPs, SIGMETs, G-AIRMETs, CWAs, winds aloft and the NWS forecast discussion.
-No API keys.
+alerts, a NOAA space weather dashboard, an aviation console with METAR/TAF,
+PIREPs, SIGMETs, G-AIRMETs, CWAs, winds aloft and the NWS forecast discussion,
+and a Part 107 drone go/no-go checklist. No API keys.
 
 ![termwx dashboard showing current conditions, animated sky, hourly graph, 3-day forecast, an alert banner, the aviation panel and space weather](docs/screenshot.png)
 
@@ -45,6 +45,7 @@ termwx --no-anim                # static sky
 | `x` | full space weather dashboard (Kp history + forecast, solar wind, Bz, SWPC bulletins) |
 | `v` | aviation screen (METAR, TAF timeline, hazards & PIREPs, winds aloft, field tools) |
 | `d` | NWS Area Forecast Discussion, aviation section first |
+| `g` | drone go/no-go: Part 107 weather checks and preflight checklist |
 | `s` / `f` | save current location as favorite / cycle favorites |
 | `r` | refresh now |
 | `p` | pause animation |
@@ -53,6 +54,9 @@ termwx --no-anim                # static sky
 
 On the aviation screen: `c` choose airport (ICAO; blank = nearest), `h` enter a runway
 number or magnetic heading, `[` / `]` cycle published runways, `r` refresh, `esc` back.
+
+On the drone screen: `space` / `enter` tick a preflight item, `+` / `-` widen or narrow the
+flight window, `t` set the planned altitude, `x` clear the ticks, `r` refresh, `esc` back.
 
 ## What's on screen
 
@@ -78,6 +82,8 @@ number or magnetic heading, `[` / `]` cycle published runways, `r` refresh, `esc
 - **Aviation** — a four-line summary of the nearest aviation station: identifier, flight
   category and report age, wind/visibility/clouds, TAF trend, and counts of SIGMETs,
   AIRMETs and PIREPs nearby. Press `v` for the full picture.
+- **Drone go/no-go** — the overall verdict for the next flight window, the worst reasons,
+  and how many preflight items are ticked. Press `g` for the checklist.
 
 ## Aviation
 
@@ -120,6 +126,58 @@ and credentials (and termwx does not scrape web pages), so the aviation screen s
 "NOTAM provider not configured". `src/termwx/api/faa_notam.py` marks where a credentialed
 provider could plug in later, reading credentials from environment variables only.
 
+## Drone go/no-go
+
+The `g` screen scores a Part 107 flight from now through the next 2 hours (`+` / `-` to
+change, up to 12). It has two parts:
+
+- **Weather, scored automatically** from the data termwx already has.
+- **Preflight**, a manual checklist of what termwx can't know.
+
+Every weather item is GO, CAUTION, NO-GO or UNKNOWN. Where two sources describe the same
+thing, such as the point forecast and the airport METAR, the **worse one counts** and is
+named. TEMPO and PROB groups in a TAF can raise CAUTION but never NO-GO on their own.
+
+| check | from | NO-GO | CAUTION |
+|---|---|---|---|
+| Daylight (§107.29) | computed civil twilight | twilight without anti-collision lighting, or night without lighting and night training | the window runs into twilight or night |
+| Visibility (§107.51(c)) | METAR, point forecast, TAF | below 3 SM (or your minimum) | within 2 SM of it |
+| Cloud clearance (§107.51(d)) | METAR, TAF | ceiling below altitude + 500 ft | a FEW/SCT layer below it |
+| Surface wind / gusts | point forecast, METAR, TAF | above your limit | ≥ 80% of it, gust spread ≥ 10 kt, TAF wind shear |
+| Wind at 400 ft | Open-Meteo 120 m level | above your limit | ≥ 80% of it |
+| Precipitation | point forecast, METAR, TAF | falling now (unless `allow_precip`) | chance in the window ≥ your limit |
+| Thunderstorms | METAR, point forecast, Convective SIGMET / CWA | observed, or an advisory over you | advisory within 50 NM, or forecast |
+| Icing | temperature, moisture | freezing rain or drizzle | ≤ 2 °C with fog, precipitation or a small dew-point spread |
+| Temperature | point forecast, METAR | outside your battery range | below 50 °F, or near the top of the range |
+| Kp index | NOAA SWPC, observed and forecast | ≥ your limit + 1 | ≥ your limit (GPS and compass errors) |
+| NWS alerts | NWS | a Severe or Extreme alert | any other alert |
+| Low-level advisories | G-AIRMET / AIRMET / SIGMET over you, base ≤ 3,000 ft | — | surface wind, LLWS, IFR, mountain obscuration, turbulence |
+| Density altitude | METAR | — | 5,000 ft or higher |
+| Observation station | METAR | — | more than 10 NM away, more than 75 min old, or offline |
+
+Missing data is never treated as GO: an UNKNOWN item makes the verdict at least CAUTION. If
+all the weather is GO but preflight items are still unticked, the verdict is **NOT READY**.
+The preflight items are:
+- certificate
+- registration
+- Remote ID
+- airspace / LAANC
+- NOTAMs and TFRs
+- site survey
+- visual line of sight
+- aircraft
+- batteries
+- pilot fitness
+
+Ticks last for the session only, and they clear when you change location.
+
+Limits live in the `[drone]` table of `config.toml` (see Configuration). Values that would
+fall below a Part 107 floor are clamped to it. Visibility can't go below 3 SM and altitude
+can't go above 400 ft.
+
+**Advisory only.** The remote pilot in command is responsible for the go/no-go decision
+(§107.19). termwx cannot check airspace, NOTAMs or TFRs, so those remain manual items.
+
 ## Refresh & offline
 
 | product | refresh |
@@ -160,6 +218,22 @@ animate = true
 visitor = true         # sky visitor with quotes, facts, jokes and headlines
 aviation_station = "KCLT"  # only present when you chose an airport; omit for the nearest
 
+[drone]                     # personal minimums for the go/no-go checklist (g)
+panel = true                # show the summary on the dashboard
+altitude_ft = 400           # planned max altitude AGL; cloud clearance needs this + 500 ft
+window_hours = 2
+max_wind_mph = 20
+max_gust_mph = 25
+max_wind_aloft_mph = 25     # Open-Meteo 120 m level ≈ 400 ft AGL
+min_visibility_sm = 3       # never below the Part 107 floor of 3
+max_precip_prob = 30
+allow_precip = false        # true only for a weather-sealed aircraft
+min_temp_f = 32
+max_temp_f = 104
+max_kp = 5
+anticollision_lighting = false  # lights visible 3 SM: allows civil twilight
+night_qualified = false         # plus updated knowledge test/training: allows night
+
 [location]
 name = "Charlotte"
 lat = 35.22709
@@ -188,7 +262,7 @@ Inspired by [wttr.in](https://github.com/chubin/wttr.in), weathr, weather-tui an
 ## Project status
 
 **Version 0.2.0** — the weather dashboard from 0.1 plus the aviation console. Everything
-listed above is implemented. The 131 tests pass against recorded fixtures, and the app has been
+listed above is implemented. The 172 tests pass against recorded fixtures, and the app has been
 run against the live services for Charlotte, Denver and Tampa.
 
 | area | status |
@@ -205,6 +279,8 @@ run against the live services for Charlotte, Denver and Tampa.
 | Density altitude, crosswind calculator | done |
 | Winds aloft | done |
 | `--once` aviation block, `--once --aviation` | done |
+| Drone go/no-go (`g`): Part 107 weather checks, preflight checklist, dashboard panel | done (new) |
+| Open-Meteo visibility in imperial mode | fixed: it arrives in feet and is now converted to meters (it was read as meters) |
 | NOTAMs | **not implemented** — needs FAA API credentials; only a placeholder module exists |
 
 ### Known limitations
@@ -241,6 +317,8 @@ run against the live services for Charlotte, Denver and Tampa.
 | `api/quips.py` | sky visitor signs |
 | `models.py`, `aviation_models.py` | dataclasses for general weather / aviation |
 | `aviation.py` | pure calculations: geometry, categories, density altitude, wind, trends |
+| `drone.py` | pure go/no-go evaluation: limits, checks, civil twilight |
+| `render_drone.py`, `screens_drone.py` | drone panel and checklist screen |
 | `render.py`, `render_aviation.py` | Rich renderers shared by the TUI and `--once` |
 | `screens.py`, `screens_aviation.py` | general screens / aviation, discussion and prompt screens |
 | `app.py`, `once.py` | the Textual app and the non-interactive snapshot |
