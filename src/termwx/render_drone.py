@@ -55,7 +55,7 @@ def drone_summary(r: D.GoNoGo | None, width: int) -> RenderableType:
             reasons.append(" · ", style=DIM)
         color = STATUS_COLORS[item.status]
         reasons.append(f"{ICONS[item.status]} ", style=color)
-        reasons.append(f"{item.label.lower()} {item.value}", style=color if item.status == D.NOGO else FG)
+        reasons.append(f"{item.label.lower()}: {item.value}", style=color if item.status == D.NOGO else FG)
     if not r.problems:
         reasons.append("all weather checks within limits", style=GOOD)
     line3 = preflight_text(r)

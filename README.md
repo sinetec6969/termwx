@@ -6,9 +6,10 @@ alerts, a NOAA space weather dashboard, an aviation console with METAR/TAF,
 PIREPs, SIGMETs, G-AIRMETs, CWAs, winds aloft and the NWS forecast discussion,
 and a Part 107 drone go/no-go checklist. No API keys.
 
-![termwx dashboard showing current conditions, animated sky, hourly graph, 3-day forecast, an alert banner, the aviation panel and space weather](docs/screenshot.png)
+![termwx dashboard showing current conditions, the night sky, hourly graph, 3-day forecast, an alert banner, and the aviation, drone go/no-go and space weather panels](docs/screenshot.png)
 
-<sub>Live data for Charlotte, NC (0.2.0), launched with <code>--demo-alert</code> to show the alert banner.</sub>
+<sub>Live data for Charlotte, NC on an October evening, launched with <code>--demo-alert</code> to show the alert banner.
+The drone panel reads NO-GO because it is after dark and the demo includes a Severe Thunderstorm Warning.</sub>
 
 ## Install
 
@@ -127,6 +128,10 @@ and credentials (and termwx does not scrape web pages), so the aviation screen s
 provider could plug in later, reading credentials from environment variables only.
 
 ## Drone go/no-go
+
+![termwx drone go/no-go screen: fifteen weather checks with values, limits and sources, the preflight checklist with four items ticked, and the details of the highlighted check](docs/drone.png)
+
+<sub>The same evening: night and the demo thunderstorm warning are NO-GO, and 4 of 10 preflight items are ticked.</sub>
 
 The `g` screen scores a Part 107 flight from now through the next 2 hours (`+` / `-` to
 change, up to 12). It has two parts:
@@ -261,9 +266,10 @@ Inspired by [wttr.in](https://github.com/chubin/wttr.in), weathr, weather-tui an
 
 ## Project status
 
-**Version 0.2.0** — the weather dashboard from 0.1 plus the aviation console. Everything
-listed above is implemented. The 172 tests pass against recorded fixtures, and the app has been
-run against the live services for Charlotte, Denver and Tampa.
+**Version 0.2.0** — the weather dashboard from 0.1 plus the aviation console, and since
+then the drone go/no-go checklist. Everything listed above is implemented. The 172 tests
+pass against recorded fixtures. The app has been run against the live services for
+Charlotte, Denver and Tampa, and the drone checklist for Charlotte, Cheyenne and Seattle.
 
 | area | status |
 |---|---|
@@ -327,6 +333,9 @@ run against the live services for Charlotte, Denver and Tampa.
 
 - A NOTAM provider using the FAA API, opt-in through environment variables.
 - Showing TAF icing/turbulence groups and G-AIRMET forecast snapshots.
+- A `--once --go` drone snapshot whose exit code reflects the verdict, for scripts.
+- Per-aircraft drone limit profiles.
+- A configurable density-altitude caution (5,000 ft is always flagged at high-elevation fields).
 
 ## Development
 
