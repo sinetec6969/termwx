@@ -3,8 +3,8 @@
 Terminal weather and aviation situational awareness: live conditions with an
 animated ASCII sky, 24–36h hourly graph, 3-day forecast, NWS severe weather
 alerts, a NOAA space weather dashboard, an aviation console with METAR/TAF,
-PIREPs, SIGMETs, G-AIRMETs, CWAs, winds aloft and the NWS forecast discussion,
-and a Part 107 drone go/no-go checklist. No API keys.
+PIREPs, SIGMETs, G-AIRMETs, CWAs, TFRs, winds aloft and the NWS forecast discussion,
+and a Part 107 drone go/no-go checklist. No API keys (NOTAMs are an opt-in extra).
 
 ![termwx dashboard showing current conditions, the night sky, hourly graph, 3-day forecast, an alert banner, and the aviation, drone go/no-go and space weather panels](docs/screenshot.png)
 
@@ -13,18 +13,46 @@ The drone panel reads NO-GO because it is after dark and the demo includes a Sev
 
 ## Install
 
+Linux and macOS, one line:
+
 ```sh
-python3 -m venv .venv
-.venv/bin/pip install -e .
-.venv/bin/termwx
+curl -fsSL https://raw.githubusercontent.com/sinetec6969/termwx/HEAD/install.sh | sh
 ```
 
-Requires Python 3.11+ and a terminal with truecolor + Unicode (most modern terminals).
+Or from a clone:
+
+```sh
+git clone https://github.com/sinetec6969/termwx.git
+cd termwx
+./install.sh
+```
+
+The installer:
+- finds Python 3.11+;
+- installs termwx into its own virtual environment in `~/.local/share/termwx`;
+- links the `termwx` command into `~/.local/bin`;
+- adds that directory to your PATH (in `.zshrc`, `.bashrc`, fish `conf.d` or `.profile`, depending on your shell);
+- runs `termwx setup`, which asks for:
+  - your ZIP code, city or lat,lon (or detects it by IP);
+  - °F or °C;
+  - your airport: the nearest one automatically, or pick one from a list;
+  - notification and animation preferences.
+
+Open a new terminal afterwards and run `termwx`.
+
+- **Change settings:** `termwx setup` any time.
+- **Upgrade:** run the installer again. Your settings are kept.
+- **Uninstall:** `./install.sh --uninstall`, or `curl … | sh -s -- --uninstall`. This removes the program, the command link and the PATH lines, and keeps your settings unless you add `--purge`.
+- **Other options:** `--no-setup` skips the questions, and `--ref <tag>` installs a specific tag or branch. `TERMWX_HOME` and `TERMWX_BIN_DIR` change where it installs.
+
+Requires Python 3.11+ (on Debian/Ubuntu also `python3-venv`) and a terminal with truecolor +
+Unicode (most modern terminals).
 
 ## Usage
 
 ```sh
-termwx                          # auto-detects location by IP on first run, then remembers it
+termwx setup                    # choose location, units, airport and preferences (re-run any time)
+termwx                          # without setup: auto-detects location by IP on first run, then remembers it
 termwx -l "Denver, CO"          # city, "City, ST", ZIP code, or "lat,lon"
 termwx -u metric                # override units
 termwx --once                   # print a snapshot and exit (great for a shell MOTD)
@@ -44,7 +72,7 @@ termwx --no-anim                # static sky
 | `u` | toggle °F / °C |
 | `w` | active alert details (or click the banner) |
 | `x` | full space weather dashboard (Kp history + forecast, solar wind, Bz, SWPC bulletins) |
-| `v` | aviation screen (METAR, TAF timeline, hazards & PIREPs, winds aloft, field tools) |
+| `v` | aviation screen (METAR, TAF timeline, hazards, TFRs, NOTAMs & PIREPs, winds aloft, field tools) |
 | `d` | NWS Area Forecast Discussion, aviation section first |
 | `g` | drone go/no-go: Part 107 weather checks and preflight checklist |
 | `s` / `f` | save current location as favorite / cycle favorites |
@@ -82,7 +110,7 @@ flight window, `t` set the planned altitude, `x` clear the ticks, `r` refresh, `
   The NWS Alerts panel also shows when the local Area Forecast Discussion was issued.
 - **Aviation** — a four-line summary of the nearest aviation station: identifier, flight
   category and report age, wind/visibility/clouds, TAF trend, and counts of SIGMETs,
-  AIRMETs and PIREPs nearby. Press `v` for the full picture.
+  AIRMETs, PIREPs and TFRs nearby (plus NOTAMs when configured). Press `v` for the full picture.
 - **Drone go/no-go** — the overall verdict for the next flight window, the worst reasons,
   and how many preflight items are ticked. Press `g` for the checklist.
 
@@ -115,6 +143,13 @@ The aviation screen (`v`) shows:
   compact cards with altitudes, time left and movement. PIREPs/AIREPs within 100 NM from the
   last 3 hours, severe/urgent first, then moderate turbulence/icing, then low ceilings or
   weather, then the rest by distance and age. Select any item for the full official text.
+- **TFRs** — temporary flight restrictions whose outline covers your location or comes
+  within 30 NM, from the FAA's published TFR feeds at tfr.faa.gov (no key). Each card shows
+  the NOTAM number, type (security, hazards, VIP, UAS public gathering, air show/sports),
+  14 CFR section, altitudes per area, validity and distance; select one for the full NOTAM
+  text. TFR distances are measured from your weather location, not the airport.
+- **NOTAMs** — the airport's NOTAMs from the FAA NOTAM Management Service, when configured
+  (see below).
 - **Winds aloft** — forecast wind and temperature at 3,000–24,000 ft from the nearest FD
   site, highlighting strong winds, levels near 0 °C, large direction changes, and an
   interpolated freezing level.
@@ -122,14 +157,31 @@ The aviation screen (`v`) shows:
 **This is weather information, not a flight-planning product.** It does not replace an
 official preflight weather briefing, NOTAMs, or the formal products they are drawn from.
 
-**NOTAMs** are not shown. The FAA's machine-to-machine NOTAM service requires registration
-and credentials (and termwx does not scrape web pages), so the aviation screen says
-"NOTAM provider not configured". `src/termwx/api/faa_notam.py` marks where a credentialed
-provider could plug in later, reading credentials from environment variables only.
+### NOTAMs (opt-in)
+
+The FAA's NOTAM Management Service (NMS) API is free but not self-serve: email
+**NOTAMS@faa.gov** to request API access. Once you have a client ID and secret, set them in
+the environment (never in `config.toml`):
+
+```sh
+export FAA_NOTAM_CLIENT_ID=…
+export FAA_NOTAM_CLIENT_SECRET=…
+export FAA_NOTAM_ENV=staging   # optional: staging or fit if the FAA gave you test access first
+```
+
+termwx then signs in (OAuth client credentials, token kept in memory only), fetches the
+aviation station's NOTAMs every 5 minutes, lists them on the aviation screen and counts them
+in the summary. NOTAM responses are never written to the disk cache. Without credentials the
+aviation screen says how to get them, and nothing is requested. termwx does not scrape the
+FAA's NOTAM search pages.
+
+The NMS response parser follows the documented GeoJSON shape but hasn't been checked
+against a live NMS response yet. If NOTAMs show "unexpected response format", that's
+where to look.
 
 ## Drone go/no-go
 
-![termwx drone go/no-go screen: fifteen weather checks with values, limits and sources, the preflight checklist with four items ticked, and the details of the highlighted check](docs/drone.png)
+![termwx drone go/no-go screen: sixteen weather checks with values, limits and sources, the preflight checklist with four items ticked, and the details of the highlighted check](docs/drone.png)
 
 <sub>The same evening: night and the demo thunderstorm warning are NO-GO, and 4 of 10 preflight items are ticked.</sub>
 
@@ -157,6 +209,7 @@ named. TEMPO and PROB groups in a TAF can raise CAUTION but never NO-GO on their
 | Kp index | NOAA SWPC, observed and forecast | ≥ your limit + 1 | ≥ your limit (GPS and compass errors) |
 | NWS alerts | NWS | a Severe or Extreme alert | any other alert |
 | Low-level advisories | G-AIRMET / AIRMET / SIGMET over you, base ≤ 3,000 ft | — | surface wind, LLWS, IFR, mountain obscuration, turbulence |
+| TFRs (§99.7, §91.137–145) | tfr.faa.gov outlines and details | inside a TFR active in the window whose floor is at or below your altitude (unknown floor counts as the surface) | inside one that starts later or whose floor is above you, within 3 NM of an active one, or offline |
 | Density altitude | METAR | — | 5,000 ft or higher |
 | Observation station | METAR | — | more than 10 NM away, more than 75 min old, or offline |
 
@@ -181,7 +234,9 @@ fall below a Part 107 floor are clamped to it. Visibility can't go below 3 SM an
 can't go above 400 ft.
 
 **Advisory only.** The remote pilot in command is responsible for the go/no-go decision
-(§107.19). termwx cannot check airspace, NOTAMs or TFRs, so those remain manual items.
+(§107.19). termwx checks published TFR outlines, but it cannot check airspace, and stadium
+(§99.7 blanket) restrictions and most other NOTAMs aren't in the TFR feed. The airspace and
+NOTAM items stay manual.
 
 ## Refresh & offline
 
@@ -193,6 +248,7 @@ can't go above 400 ft.
 | METAR / SPECI (with 6h history) | 5 min |
 | TAF | 10 min |
 | SIGMET / G-AIRMET / CWA and PIREPs | 5 min |
+| TFRs, and NOTAMs when configured | 5 min |
 | Area Forecast Discussion | 20 min (re-downloaded only when a new one is issued) |
 | Winds aloft | 30 min |
 | Aviation station and runways | only when the location or chosen airport changes |
@@ -258,6 +314,8 @@ timezone = "America/New_York"
 | Forecast, air quality, geocoding | [Open-Meteo](https://open-meteo.com/) (CC BY 4.0, non-commercial) |
 | Severe weather alerts, Area Forecast Discussions | [NWS API](https://www.weather.gov/documentation/services-web-api) — US & territories only |
 | Aviation (METAR, TAF, PIREP, SIGMET, G-AIRMET, AIRMET, CWA, winds aloft, stations, runways) | [Aviation Weather Center Data API](https://aviationweather.gov/data/api/) |
+| Temporary flight restrictions | [FAA TFR feeds](https://tfr.faa.gov/) (GeoServer outlines + XNOTAM detail) |
+| NOTAMs (opt-in, credentials required) | [FAA NOTAM Management Service](https://nms.aim.faa.gov/) |
 | Space weather | [NOAA SWPC](https://services.swpc.noaa.gov/) |
 | IP location | [ipinfo.io](https://ipinfo.io/) (fallback ipapi.co) |
 | Sky visitor signs | ZenQuotes, DummyJSON, Advice Slip, catfact.ninja, Dog API, Useless Facts, Wikipedia On This Day, Open Trivia DB, TheMealDB, NPR & BBC RSS, icanhazdadjoke, JokeAPI, Official Joke API, chucknorris.io, kanye.rest |
@@ -266,8 +324,12 @@ Inspired by [wttr.in](https://github.com/chubin/wttr.in), weathr, weather-tui an
 
 ## Project status
 
-**Version 0.2.0** — the weather dashboard from 0.1 plus the aviation console, and since
-then the drone go/no-go checklist. Everything listed above is implemented. The 172 tests
+**Version 0.3.0** adds three things to the 0.2 aviation console and drone checklist:
+- TFRs from the FAA, with no key needed;
+- opt-in NOTAMs from the FAA NOTAM Management Service;
+- the Linux/macOS installer with `termwx setup`.
+
+Everything listed above is implemented. The 191 tests
 pass against recorded fixtures. The app has been run against the live services for
 Charlotte, Denver and Tampa, and the drone checklist for Charlotte, Cheyenne and Seattle.
 
@@ -285,9 +347,11 @@ Charlotte, Denver and Tampa, and the drone checklist for Charlotte, Cheyenne and
 | Density altitude, crosswind calculator | done |
 | Winds aloft | done |
 | `--once` aviation block, `--once --aviation` | done |
-| Drone go/no-go (`g`): Part 107 weather checks, preflight checklist, dashboard panel | done (new) |
+| Drone go/no-go (`g`): Part 107 weather checks, preflight checklist, dashboard panel | done in 0.2 |
 | Open-Meteo visibility in imperial mode | fixed: it arrives in feet and is now converted to meters (it was read as meters) |
-| NOTAMs | **not implemented** — needs FAA API credentials; only a placeholder module exists |
+| TFRs: aviation screen, summary count, drone check, `--once --aviation` | done (new in 0.3) |
+| Installer (`install.sh`) and `termwx setup` | done (new in 0.3); tested on Linux (bash, dash, zsh); not yet run on macOS or under fish |
+| NOTAMs via FAA NMS | done, opt-in through environment variables; not yet verified against a live NMS response |
 
 ### Known limitations
 
@@ -308,6 +372,8 @@ Charlotte, Denver and Tampa, and the drone checklist for Charlotte, Cheyenne and
   the usual approximation for crosswind estimates.
 - **PIREP search radius:** AWC doesn't document the unit of its `distance` parameter, so termwx
   over-asks slightly and trims to 100 NM itself.
+- **TFR schedules:** TFRs that are only active at scheduled times (e.g. "DLY 1300-0330") are
+  treated as active for their whole validity window and flagged; read the NOTAM text.
 - **US coverage only** for NWS alerts and forecast discussions. METAR/TAF and international
   SIGMETs work elsewhere, but have only been checked for US locations.
 
@@ -319,7 +385,8 @@ Charlotte, Denver and Tampa, and the drone checklist for Charlotte, Cheyenne and
 | `api/nws.py` | alerts, forecast office lookup, Area Forecast Discussion |
 | `api/swpc.py` | space weather |
 | `api/awc.py` | all Aviation Weather Center products, normalized at the boundary |
-| `api/faa_notam.py` | placeholder for a future credentialed NOTAM provider |
+| `api/faa_tfr.py` | FAA TFR outlines and details (no key) |
+| `api/faa_notam.py` | opt-in FAA NMS NOTAM client (credentials from the environment) |
 | `api/quips.py` | sky visitor signs |
 | `models.py`, `aviation_models.py` | dataclasses for general weather / aviation |
 | `aviation.py` | pure calculations: geometry, categories, density altitude, wind, trends |
@@ -328,10 +395,11 @@ Charlotte, Denver and Tampa, and the drone checklist for Charlotte, Cheyenne and
 | `render.py`, `render_aviation.py` | Rich renderers shared by the TUI and `--once` |
 | `screens.py`, `screens_aviation.py` | general screens / aviation, discussion and prompt screens |
 | `app.py`, `once.py` | the Textual app and the non-interactive snapshot |
+| `setup_wizard.py`, `install.sh` | `termwx setup` questions; the Linux/macOS installer |
 
 ### Possible next steps
 
-- A NOTAM provider using the FAA API, opt-in through environment variables.
+- Check the NMS NOTAM parser against a live response once credentials arrive.
 - Showing TAF icing/turbulence groups and G-AIRMET forecast snapshots.
 - A `--once --go` drone snapshot whose exit code reflects the verdict, for scripts.
 - Per-aircraft drone limit profiles.
@@ -340,8 +408,10 @@ Charlotte, Denver and Tampa, and the drone checklist for Charlotte, Cheyenne and
 ## Development
 
 ```sh
+python3 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
 .venv/bin/pytest
+.venv/bin/termwx
 ```
 
 Tests run entirely against recorded API responses in `tests/fixtures/` (no network access),

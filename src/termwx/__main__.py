@@ -5,13 +5,32 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+from importlib.metadata import PackageNotFoundError, version
 
 from .config import Config
 from .units import IMPERIAL, METRIC
 
 
+def _version() -> str:
+    try:
+        return version("termwx")
+    except PackageNotFoundError:
+        return "unknown"
+
+
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="termwx", description="Ultimate terminal weather.")
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["setup"]:
+        from .setup_wizard import main as setup
+
+        return setup(argv[1:])
+
+    p = argparse.ArgumentParser(
+        prog="termwx",
+        description="Ultimate terminal weather.",
+        epilog="Run `termwx setup` to choose your location, units, airport and preferences.",
+    )
+    p.add_argument("--version", action="version", version=f"termwx {_version()}")
     p.add_argument("-l", "--location", help='place to show: "City, ST", ZIP, or "lat,lon"')
     p.add_argument("-u", "--units", choices=[IMPERIAL, METRIC], help="override saved units")
     p.add_argument("--once", action="store_true", help="print a snapshot and exit (no TUI)")

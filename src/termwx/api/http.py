@@ -11,7 +11,7 @@ from typing import Any
 import httpx
 
 # NOAA/NWS and the Aviation Weather Center ask for a descriptive, contactable User-Agent.
-USER_AGENT = "termwx/0.2 (terminal weather; https://github.com/sinetec6969/termwx)"
+USER_AGENT = "termwx/0.3 (terminal weather; https://github.com/sinetec6969/termwx)"
 
 
 class FetchError(Exception):

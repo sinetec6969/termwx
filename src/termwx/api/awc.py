@@ -214,6 +214,26 @@ async def fetch_airport_details(http: Http, station: AviationStation) -> None:
         pass
 
 
+async def nearby_stations(http: Http, lat: float, lon: float, limit: int = 5
+                          ) -> tuple[list[tuple[AviationStation, float, float]], str]:
+    """The nearest METAR sites as (station, NM, bearing), nearest first, plus the
+    ICAO that automatic selection would pick ("" if none). Raises FetchError."""
+    for radius in (30, A.MAX_STATION_NM):
+        data, _ = await http.get_json(URLS["stationinfo"], {"bbox": _bbox(lat, lon, radius), "format": "json"})
+        stations = [s for s in parse_stations(data) if s.has_metar]
+        if len(stations) >= limit or radius == A.MAX_STATION_NM:
+            break
+    rows = sorted(((s, A.distance_nm(lat, lon, s.lat, s.lon), A.bearing_deg(lat, lon, s.lat, s.lon)) for s in stations),
+                  key=lambda r: r[1])
+    rows = [r for r in rows if r[1] <= A.MAX_STATION_NM]
+    picked = pick_station(stations, lat, lon)
+    auto = picked[0].icao if picked else ""
+    top = rows[:limit]
+    if auto and all(s.icao != auto for s, _, _ in top):  # a TAF site a little farther out
+        top += [r for r in rows if r[0].icao == auto]
+    return top, auto
+
+
 async def lookup_station(http: Http, ident: str) -> AviationStation | None:
     data, _ = await http.get_json(URLS["stationinfo"], {"ids": _clean_ident(ident), "format": "json"})
     return next((s for s in parse_stations(data) if s.icao.upper() == _clean_ident(ident)), None)
