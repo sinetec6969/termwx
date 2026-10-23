@@ -9,7 +9,7 @@ from rich.console import Console
 
 from conftest import FIXTURE_NOW, FakeHttp, FetchError, load, load_text
 from termwx import aviation as A, render_aviation as RA
-from termwx.api import awc, faa_notam, nws
+from termwx.api import awc, faa_notam, faa_tfr, nws
 from termwx.api.http import Http
 from termwx.aviation_models import (
     AviationHazard,
@@ -543,7 +543,7 @@ def test_summary_counts_and_notam_status(monkeypatch):
     assert lines[3].startswith("1 SIGMET · 1 AIRMET · 5 PIREPs/100NM")
     assert len(lines) == 4  # compact: the full picture is on the Aviation screen
     monkeypatch.delenv(faa_notam.ENV_ID, raising=False)
-    assert faa_notam.status().startswith("NOTAM provider not configured")
+    assert faa_notam.status().startswith("not configured") and "NOTAMS@faa.gov" in faa_notam.status()
     monkeypatch.setenv(faa_notam.ENV_ID, "x")
     monkeypatch.setenv(faa_notam.ENV_SECRET, "y")
     assert faa_notam.configured()
@@ -626,3 +626,152 @@ async def test_once_snapshot_aviation_sections():
     await snapshot(cfg, None, "imperial", aviation_detail=True, http=FakeHttp(), console=console)
     out = console.export_text()
     assert "Raw TAF" in out and "Winds aloft" in out and "PIREPs · 100 NM" in out and "Area Forecast" not in out
+
+
+# ── TFRs (tfr.faa.gov) ───────────────────────────────────────────────────────
+TFR_NOW = datetime(2026, 10, 22, 16, 45, tzinfo=timezone.utc)  # when the TFR fixtures were recorded
+RALEIGH_TFR = (35.79555, -78.71139)  # center of FDC 6/9169
+
+
+def test_tfr_list_parsing_groups_areas():
+    tfrs = {t.notam_id: t for t in faa_tfr.parse_tfr_list(load("faa_tfr_wfs.json"))}
+    assert set(tfrs) == {"6/9169", "6/0675", "6/1679", "6/4348"}
+    gf = tfrs["6/4348"]
+    assert len(gf.polygons) == 2 and gf.legal == "SECURITY" and gf.state == "ND" and gf.facility
+    lat, lon = gf.polygons[0][0]
+    assert 47 < lat < 49 and -98 < lon < -97  # GeoJSON [lon, lat] swapped to (lat, lon)
+    assert faa_tfr.detail_url("6/4348").endswith("/download/detail_6_4348.xml")
+
+
+def test_tfr_detail_parsing():
+    t = faa_tfr.parse_tfr_list(load("faa_tfr_wfs.json"))[0]
+    faa_tfr.parse_tfr_detail(load_text("faa_tfr_detail_6_9169.xml"), t)
+    assert t.valid_from == datetime(2026, 10, 15, 13, 0, tzinfo=timezone.utc)
+    assert t.valid_to == datetime(2026, 10, 26, 3, 30, tzinfo=timezone.utc)
+    assert t.rule == "99.7" and len(t.areas) == 1
+    assert (t.areas[0].base_ft, t.areas[0].base_ref, t.areas[0].top_ft, t.areas[0].top_ref) == (0, "AGL", 400, "AGL")
+    assert t.raw.startswith("!FDC 6/9169") and t.scheduled  # "DLY 1300-0330"
+    gf = next(x for x in faa_tfr.parse_tfr_list(load("faa_tfr_wfs.json")) if x.notam_id == "6/4348")
+    faa_tfr.parse_tfr_detail(load_text("faa_tfr_detail_6_4348.xml"), gf)
+    assert [(a.base_ft, a.base_ref, a.top_ft, a.top_ref) for a in gf.areas] == [(0, "AGL", 2400, "MSL"), (2400, "MSL", 18000, "FL")]
+    assert gf.floor is gf.areas[0]
+    assert RA.tfr_altitudes(gf) == "SFC–FL180 · 2 areas" and RA.area_altitudes(gf.areas[1]) == "2,400 MSL–FL180"
+    with pytest.raises(ValueError):
+        faa_tfr.parse_tfr_detail("<XNOTAM-Update/>", gf)
+
+
+async def test_fetch_tfrs_filters_by_distance_and_survives_detail_failures():
+    http = FakeHttp()
+    near, stale = await faa_tfr.fetch_tfrs(http, *RALEIGH_TFR)
+    assert [t.notam_id for t in near] == ["6/9169"] and near[0].contains_point and not stale
+    assert near[0].rule == "99.7" and near[0].raw  # detail fetched only for the nearby one
+    assert sum("download/detail" in url for url, _ in http.calls) == 1
+    # 20 NM east: outside, but within the 30 NM display radius
+    near, _ = await faa_tfr.fetch_tfrs(FakeHttp(), RALEIGH_TFR[0], RALEIGH_TFR[1] + 0.4)
+    assert near and not near[0].contains_point and 15 < near[0].distance_nm < 25
+    assert (await faa_tfr.fetch_tfrs(FakeHttp(), CLT_LAT, CLT_LON))[0] == []
+    failing = FakeHttp({"detail_6_9169": FetchError("HTTP 500 from tfr.faa.gov", 500)})
+    near, _ = await faa_tfr.fetch_tfrs(failing, *RALEIGH_TFR)
+    assert near[0].title.startswith("RALEIGH") and "500" in near[0].detail_error and not near[0].areas
+    with pytest.raises(FetchError):
+        await faa_tfr.fetch_tfrs(FakeHttp({"tfr.faa.gov/geoserver": FetchError("offline")}), *RALEIGH_TFR)
+
+
+async def test_tfr_rendering_and_summary_count():
+    near, _ = await faa_tfr.fetch_tfrs(FakeHttp(), *RALEIGH_TFR)
+    card = text(RA.tfr_card(near[0], TFR_NOW))
+    assert "FDC 6/9169 · SECURITY · §99.7" in card and "SFC–400 AGL" in card and "over your location" in card
+    detail = text(RA.tfr_detail(near[0], TFR_NOW))
+    assert "14 CFR §99.7" in detail and "!FDC 6/9169" in detail
+    assert A.relevant_tfrs(near, TFR_NOW) == near
+    assert A.relevant_tfrs(near, datetime(2026, 10, 27, tzinfo=timezone.utc)) == []  # expired
+    av = AviationResult(choice=StationChoice(AviationStation("KRDU", "Raleigh-Durham", 35.88, -78.79), "auto", 6, 0))
+    av.hazards.ok(HazardSet(), False, TFR_NOW)
+    av.pireps.ok([], False, TFR_NOW)
+    av.tfrs.ok(near, False, TFR_NOW)
+    assert text(RA.hazards_line(av, TFR_NOW)).strip().endswith("· 1 TFR")
+
+
+# ── NOTAMs (FAA NMS, opt-in) ─────────────────────────────────────────────────
+NMS_RESPONSE = {
+    "status": "Success",
+    "data": {"geojson": [
+        {"type": "Feature", "geometry": None, "properties": {"coreNOTAMData": {"notam": {
+            "id": "NOTAM_1", "number": "10/123", "type": "N", "issued": "2026-10-06T12:00:00Z",
+            "classification": "DOM", "location": "CLT", "icaoLocation": "KCLT", "featureType": "RWY",
+            "effectiveStart": "2026-10-06T12:00:00Z", "effectiveEnd": "2026-10-09T22:00:00Z",
+            "text": "RWY 18C/36C CLSD"}}}},
+        {"type": "Feature", "geometry": None, "properties": {"coreNOTAMData": {"notam": {
+            "number": "10/099", "icaoLocation": "KCLT", "featureType": "OBST",
+            "effectiveStart": "2026-09-01T00:00:00Z", "effectiveEnd": "PERM", "text": "OBST TOWER LGT U/S"}}}},
+    ]},
+}
+
+
+def nms_http(tmp_path, responses: list[httpx.Response] | None = None):
+    calls: list[httpx.Request] = []
+    queue = list(responses or [])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if request.url.path == "/v1/auth/token":
+            return httpx.Response(200, json={"access_token": f"tok{len(calls)}", "expires_in": 1799})
+        return queue.pop(0) if queue else httpx.Response(200, json=NMS_RESPONSE)
+
+    http = Http(cache_dir=tmp_path)
+    http.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    return http, calls
+
+
+def test_parse_nms_notams():
+    notams = faa_notam.parse_notams(NMS_RESPONSE)
+    assert [n.number for n in notams] == ["10/123", "10/099"]
+    rwy, obst = notams
+    assert rwy.location == "KCLT" and rwy.feature == "RWY" and rwy.text == "RWY 18C/36C CLSD"
+    assert rwy.valid_to == datetime(2026, 10, 9, 22, 0, tzinfo=timezone.utc) and obst.valid_to is None  # PERM
+    with pytest.raises(ValueError):
+        faa_notam.parse_notams({"data": {}})
+    assert "RWY" in text(RA.notam_line(rwy, NOW)) and "RWY 18C/36C CLSD" in text(RA.notam_detail(rwy, NOW))
+
+
+async def test_nms_unconfigured_makes_no_request(tmp_path):
+    http, calls = nms_http(tmp_path)
+    assert not faa_notam.configured()
+    with pytest.raises(FetchError):
+        await faa_notam.fetch_notams(http, "KCLT")
+    assert calls == []
+
+
+async def test_nms_token_reuse_and_no_disk_cache(tmp_path, monkeypatch):
+    monkeypatch.setenv(faa_notam.ENV_ID, "my-id")
+    monkeypatch.setenv(faa_notam.ENV_SECRET, "s3cret-value")
+    http, calls = nms_http(tmp_path)
+    notams, stale = await faa_notam.fetch_notams(http, "KCLT")
+    assert [n.number for n in notams] == ["10/123", "10/099"] and not stale
+    await faa_notam.fetch_notams(http, "KCLT")
+    paths = [r.url.path for r in calls]
+    assert paths == ["/v1/auth/token", "/nmsapi/v1/notams", "/nmsapi/v1/notams"]  # token reused
+    auth = calls[0]
+    assert auth.url.host == "api-nms.aim.faa.gov" and auth.headers["authorization"].startswith("Basic ")
+    assert calls[1].headers["authorization"] == "Bearer tok1" and calls[1].headers["nmsresponseformat"] == "GEOJSON"
+    assert calls[1].url.params["location"] == "KCLT"
+    cached = "".join(p.read_text() for p in tmp_path.rglob("*") if p.is_file())
+    assert "s3cret" not in cached and "tok1" not in cached and "10/123" not in cached
+
+
+async def test_nms_401_signs_in_again_and_bad_schema_fails_only_notams(tmp_path, monkeypatch):
+    monkeypatch.setenv(faa_notam.ENV_ID, "id")
+    monkeypatch.setenv(faa_notam.ENV_SECRET, "secret")
+    monkeypatch.setenv(faa_notam.ENV_SERVER, "staging")
+    http, calls = nms_http(tmp_path, [httpx.Response(401), httpx.Response(200, json=NMS_RESPONSE)])
+    notams, _ = await faa_notam.fetch_notams(http, "KCLT")
+    assert len(notams) == 2 and [r.url.path for r in calls].count("/v1/auth/token") == 2
+    assert calls[0].url.host == "api-staging.cgifederal-aim.com"
+    http, _ = nms_http(tmp_path, [httpx.Response(200, json={"unexpected": True})])
+    with pytest.raises(FetchError, match="unexpected response format"):
+        await faa_notam.fetch_notams(http, "KCLT")
+    rejected = Http(cache_dir=tmp_path)
+    rejected.client = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(401)))
+    faa_notam.forget_token()
+    with pytest.raises(FetchError, match="sign-in failed"):
+        await faa_notam.fetch_notams(rejected, "KCLT")

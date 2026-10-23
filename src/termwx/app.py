@@ -18,11 +18,11 @@ from textual.widgets import Footer, Static
 from rich.console import Group
 
 from . import aviation as A, drone as D, render as R, render_aviation as RA, render_drone as RD, units as U, wmo
-from .api import awc, faa_notam, geo, nws, openmeteo, quips, swpc
+from .api import awc, faa_notam, faa_tfr, geo, nws, openmeteo, quips, swpc
 from .api.http import FetchError, Http
 from .aviation_models import AviationResult, StationChoice
 from .config import Config
-from .demo import demo_alerts
+from .demo import demo_alerts, demo_tfr
 from .models import Alert, AlertsResult, ForecastDiscussion, Location, SpaceWeather, Weather
 from .scene import SceneState
 from .screens import AUTO, AlertsScreen, HelpScreen, LocationScreen, SpaceScreen
@@ -318,6 +318,8 @@ class TermWx(App):
     def _refresh_hazards(self) -> None:
         self.load_pireps()
         self.load_hazards()
+        self.load_tfrs()  # TFRs appear at short notice (VIP movement, wildfires)
+        self.load_notams()
 
     def _aviation_ref(self) -> tuple[float, float] | None:
         st = self.aviation.station
@@ -370,6 +372,25 @@ class TermWx(App):
         if ref is None or av.choice is None:
             return
         await self._fetch_into(av, "hazards", lambda: awc.fetch_hazards(self.http, *ref))
+
+    @work(exclusive=True, group="av-tfr")
+    async def load_tfrs(self) -> None:
+        av, loc = self.aviation, self.location
+        if loc is None or av.choice is None:
+            return
+
+        async def fetch():
+            tfrs, stale = await faa_tfr.fetch_tfrs(self.http, loc.lat, loc.lon)
+            return ([demo_tfr(loc.lat, loc.lon)] if self.demo_alert else []) + tfrs, stale
+
+        await self._fetch_into(av, "tfrs", fetch)
+
+    @work(exclusive=True, group="av-notam")
+    async def load_notams(self) -> None:
+        av, st = self.aviation, self.aviation.station
+        if st is None or not faa_notam.configured():
+            return
+        await self._fetch_into(av, "notams", lambda: faa_notam.fetch_notams(self.http, st.icao))
 
     @work(exclusive=True, group="av-winds")
     async def load_winds(self) -> None:

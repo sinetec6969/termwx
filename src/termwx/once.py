@@ -11,11 +11,11 @@ from rich.table import Table
 from rich.text import Text
 
 from . import aviation as A, render as R, render_aviation as RA, wmo
-from .api import awc, geo, nws, openmeteo, swpc
+from .api import awc, faa_notam, faa_tfr, geo, nws, openmeteo, swpc
 from .api.http import FetchError, Http
 from .aviation_models import AviationResult
 from .config import Config
-from .demo import demo_alerts
+from .demo import demo_alerts, demo_tfr
 from .models import AlertsResult, Location
 from .scene import SceneState, render_scene
 
@@ -37,15 +37,18 @@ async def resolve_location(http: Http, cfg: Config, query: str | None) -> Locati
     return await geo.autolocate(http)
 
 
-async def fetch_aviation(http: Http, loc: Location, explicit: str | None) -> AviationResult:
-    """Station + METAR/TAF/PIREPs/advisories (and winds) concurrently; each product fails on its own."""
+async def fetch_aviation(http: Http, loc: Location, explicit: str | None, demo: bool = False) -> AviationResult:
+    """Station + METAR/TAF/PIREPs/advisories/TFRs (winds, NOTAMs) concurrently; each product fails on its own."""
     choice = await awc.choose_station(http, loc.lat, loc.lon, explicit or None)
     av = AviationResult(choice=choice)
     st = choice.station
     ref = (st.lat, st.lon) if st else (loc.lat, loc.lon)
-    jobs = {"hazards": awc.fetch_hazards(http, *ref), "winds": awc.fetch_winds(http, *ref)}
+    jobs = {"hazards": awc.fetch_hazards(http, *ref), "winds": awc.fetch_winds(http, *ref),
+            "tfrs": faa_tfr.fetch_tfrs(http, loc.lat, loc.lon)}
     if st:
         jobs |= {"metars": awc.fetch_metars(http, st.icao), "taf": awc.fetch_taf(http, st.icao), "pireps": awc.fetch_pireps(http, st)}
+        if faa_notam.configured():
+            jobs["notams"] = faa_notam.fetch_notams(http, st.icao)
     results = await asyncio.gather(*jobs.values(), return_exceptions=True)
     now = A.utcnow()
     for name, res in zip(jobs, results):
@@ -56,6 +59,8 @@ async def fetch_aviation(http: Http, loc: Location, explicit: str | None) -> Avi
             raise res
         else:
             feed.ok(res[0], res[1], now)
+    if demo:
+        av.tfrs.data = [demo_tfr(loc.lat, loc.lon)] + (av.tfrs.data or [])
     return av
 
 
@@ -75,7 +80,7 @@ async def snapshot(
             openmeteo.fetch_weather(http, loc, units),
             nws.fetch_alerts(http, loc),
             swpc.fetch_space(http, loc.lat, loc.lon),
-            fetch_aviation(http, loc, cfg.aviation_station),
+            fetch_aviation(http, loc, cfg.aviation_station, demo),
             return_exceptions=True,
         )
     finally:
@@ -151,6 +156,12 @@ def aviation_snapshot(av: AviationResult, units: str, width: int, now) -> list:
     hz = A.relevant_hazards(av.hazards.data.items, now) if av.hazards.data else []
     cards = [RA.hazard_card(h, now) for h in hz[:6]] or [Text(av.hazards.error or "no advisories within 50 NM", style=R.DIM)]
     out.append(_panel(Group(*cards), "Advisories"))
+    tfrs = A.relevant_tfrs(av.tfrs.data, now) if av.tfrs.data else []
+    cards = [RA.tfr_card(t, now) for t in tfrs[:6]] or [Text(av.tfrs.error or f"none within {A.TFR_NEAR_NM} NM", style=R.DIM)]
+    out.append(_panel(Group(*cards), "TFRs · tfr.faa.gov"))
+    if faa_notam.configured():
+        lines = [RA.notam_line(n, now) for n in (av.notams.data or [])[:12]] or [Text(av.notams.error or "none", style=R.DIM)]
+        out.append(_panel(Group(*lines), f"NOTAMs · {av.station.icao}"))
     pireps = A.recent_pireps(av.pireps.data, now)[:8] if av.pireps.data else []
     lines = [RA.pirep_line(p, now) for p in pireps] or [Text(av.pireps.error or "no recent PIREPs", style=R.DIM)]
     out.append(_panel(Group(*lines), f"PIREPs · {A.PIREP_RADIUS_NM} NM"))

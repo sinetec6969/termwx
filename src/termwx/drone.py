@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from . import aviation as A, units as U, wmo
-from .aviation_models import AviationResult, CEILING_COVERS, CloudLayer, TafPeriod
+from .aviation_models import AviationResult, CEILING_COVERS, CloudLayer, TafPeriod, Tfr
 from .models import AlertsResult, Hour, Location, SpaceWeather, Weather
 
 GO, CAUTION, NOGO, UNKNOWN = "GO", "CAUTION", "NO-GO", "UNKNOWN"
@@ -36,6 +36,7 @@ HOT_MARGIN_F = 5
 ICING_TEMP_C = 2
 HIGH_DA_FT = 5000
 LOW_LEVEL_FT = 3000  # advisories based above this don't reach a drone
+TFR_CAUTION_NM = 3  # an active TFR this close is worth a look at the boundary
 KT_TO_MPH = 1.150779
 SUN_ALT_SET = -0.833  # sunrise/sunset: upper limb with refraction
 SUN_ALT_CIVIL = -6.0
@@ -126,7 +127,8 @@ MANUAL_ITEMS = (
     ManualItem("airspace", "Airspace checked", "§107.41",
                "Class B, C, D and surface-area E need a LAANC or DroneZone authorization before takeoff."),
     ManualItem("notams", "NOTAMs and TFRs checked", "§107.45 · §99.7",
-               "Check NOTAMs and temporary flight restrictions (stadiums, VIP movement, wildfires, security areas) from official sources."),
+               "termwx checks published TFR outlines automatically, but stadium (§99.7) and other restrictions aren't all "
+               "in that feed — check the full NOTAM set from official sources."),
     ManualItem("site", "Site surveyed", "§107.39 · §107.145 · §107.49",
                "People and moving vehicles, obstacles, wires and towers, launch and recovery area, emergency landing spots."),
     ManualItem("vlos", "Visual line of sight planned", "§107.31 · §107.33",
@@ -743,6 +745,66 @@ def check_advisories(c: _Ctx) -> CheckItem:
     return item
 
 
+def _tfr_reaches(t: Tfr, c: _Ctx) -> tuple[bool | None, str]:
+    """Whether the TFR's lowest area reaches the planned altitude: True, False, or None when it can't be told."""
+    a = t.floor
+    if a is None:
+        return None, "altitudes unknown — treated as surface"
+    if a.base_ft is None or a.base_ft == 0:
+        return True, ""
+    if a.base_ref == "AGL":
+        return a.base_ft <= c.limits.altitude_ft, ""
+    if a.base_ref == "FL":
+        return False, ""
+    st = c.av.station if c.av else None
+    if st is None or st.elev_ft is None or c.av.choice.distance_nm is None or c.av.choice.distance_nm > NEAR_STATION_NM:
+        return None, f"floor {a.base_ft:,} ft MSL and the ground elevation is unknown"
+    return a.base_ft - st.elev_ft <= c.limits.altitude_ft, f"floor {a.base_ft:,} ft MSL ≈ {a.base_ft - st.elev_ft:,.0f} ft AGL ({st.icao} elevation)"
+
+
+def check_tfr(c: _Ctx) -> CheckItem:
+    item = CheckItem("tfr", "TFRs", GO, value="none", limit="outside active TFRs", source="tfr.faa.gov",
+                     rule="§99.7 · §91.137–145")
+    feed = c.av.tfrs if c.av else None
+    if feed is None or not feed.loaded:
+        item.status, item.value = UNKNOWN, "loading"
+        return item
+    if feed.data is None:
+        item.status, item.value = UNKNOWN, feed.error or "unavailable"
+        return item
+    worst: tuple[str, str] | None = None
+    for t in feed.data:
+        if t.valid_to is not None and t.valid_to <= c.now:
+            continue
+        inside, dist = A.tfr_position(t, c.loc.lat, c.loc.lon)
+        name = f"FDC {t.notam_id}" if t.notam_id[:1].isdigit() else t.notam_id
+        if inside and A.tfr_active(t, c.now, c.end):
+            reaches, why = _tfr_reaches(t, c)
+            if reaches is False:
+                st, value = CAUTION, f"{name} above {c.limits.altitude_ft} ft"
+            else:
+                st, value = NOGO, f"inside {name}"
+            item.notes.append(f"{name} · {t.legal} · {t.title}" + (f" — {why}" if why else ""))
+            if t.scheduled:
+                item.notes.append(f"{name} is active only at scheduled times — read the NOTAM text.")
+        elif inside:
+            st, value = CAUTION, f"{name} from {t.valid_from:%H%MZ}" if t.valid_from else name
+            item.notes.append(f"{name} starts after this window · {t.title}")
+        elif dist is not None and dist <= TFR_CAUTION_NM and A.tfr_active(t, c.now, c.end):
+            st, value = CAUTION, f"{name} {dist:.1f} NM"
+            item.notes.append(f"{name} boundary is {dist:.1f} NM away · {t.title}")
+        else:
+            continue
+        if worst is None or STATUS_RANK[st] > STATUS_RANK[worst[0]]:
+            worst = (st, value)
+    if worst:
+        item.status, item.value = worst
+    if feed.stale:
+        item.status = max(item.status, CAUTION, key=lambda s: STATUS_RANK[s])
+        item.notes.append("TFRs are from the offline cache — new restrictions may be missing.")
+    return item
+
+
 def check_density_altitude(c: _Ctx) -> CheckItem:
     item = CheckItem("da", "Density altitude", GO, limit=f"< {HIGH_DA_FT:,} ft", rule="performance")
     m, st = c.metar, c.av.station if c.av else None
@@ -793,7 +855,7 @@ def check_station(c: _Ctx) -> CheckItem:
 CHECKS = (
     check_daylight, check_visibility, check_clouds, check_wind, check_gusts, check_wind_aloft,
     check_precip, check_thunder, check_icing, check_temperature, check_kp, check_alerts,
-    check_advisories, check_density_altitude, check_station,
+    check_advisories, check_tfr, check_density_altitude, check_station,
 )
 
 

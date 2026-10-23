@@ -15,12 +15,14 @@ from .aviation_models import (
     Pirep,
     TafForecast,
     TafPeriod,
+    Tfr,
     WindsAloftLevel,
 )
 
 EARTH_RADIUS_NM = 3440.065
 MAX_STATION_NM = 75  # never auto-select an airport farther than this from the weather location
 HAZARD_NEAR_NM = 50  # show advisories whose area comes within this distance
+TFR_NEAR_NM = 30  # show TFRs whose outline comes within this distance of the weather location
 PIREP_RADIUS_NM = 100
 PIREP_MAX_AGE_H = 3
 
@@ -397,6 +399,35 @@ def relevant_hazards(hazards: list[AviationHazard], now: datetime, near_nm: floa
         if h.contains_point or (h.distance_nm is not None and h.distance_nm <= near_nm):
             out.append(h)
     return sorted(out, key=lambda h: (not h.contains_point, _KIND_ORDER.get(h.kind, 3), h.distance_nm or 0))
+
+
+# ── TFRs ─────────────────────────────────────────────────────────────────────
+def tfr_position(t: Tfr, lat: float, lon: float) -> tuple[bool, float | None]:
+    """(point inside any area, distance in NM to the nearest outline)."""
+    inside, dist = False, None
+    for poly in t.polygons:
+        inside = inside or point_in_polygon(lat, lon, poly)
+        d = distance_to_shape_nm(lat, lon, poly)
+        if d is not None and (dist is None or d < dist):
+            dist = d
+    return inside, dist
+
+
+def locate_tfrs(tfrs: list[Tfr], lat: float, lon: float) -> None:
+    for t in tfrs:
+        t.contains_point, t.distance_nm = tfr_position(t, lat, lon)
+
+
+def tfr_active(t: Tfr, start: datetime, end: datetime) -> bool:
+    """Whether the TFR's validity overlaps [start, end). Unknown times count as active."""
+    return (t.valid_from is None or t.valid_from < end) and (t.valid_to is None or t.valid_to > start)
+
+
+def relevant_tfrs(tfrs: list[Tfr], now: datetime, near_nm: float = TFR_NEAR_NM) -> list[Tfr]:
+    """Unexpired TFRs over or within `near_nm` of the located point: over it first, then active, then nearest."""
+    out = [t for t in tfrs if (t.valid_to is None or t.valid_to > now)
+           and (t.contains_point or (t.distance_nm is not None and t.distance_nm <= near_nm))]
+    return sorted(out, key=lambda t: (not t.contains_point, not tfr_active(t, now, now), t.distance_nm or 0))
 
 
 # ── winds aloft ──────────────────────────────────────────────────────────────

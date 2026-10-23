@@ -117,10 +117,20 @@ class DroneScreen(Screen[None]):
         if kind == "check":
             detail = RD.check_detail(obj)
         else:
-            note = faa_notam.status() if obj.id == "notams" else ""
+            note = self._notam_note() if obj.id == "notams" else ""
             detail = RD.manual_detail(obj, obj.id in self.app.drone_ticks, note)
         self.query_one("#drone-detail", Static).update(Group(detail))
         self.query_one("#drone-detail-scroll").scroll_home(animate=False)
+
+    def _notam_note(self) -> str:
+        if not faa_notam.configured():
+            return "NOTAMs: " + faa_notam.status()
+        av = self.app.aviation
+        if av.notams.error:
+            return f"NOTAMs: {av.notams.error}"
+        if av.notams.data is not None and av.station:
+            return f"{len(av.notams.data)} NOTAMs at {av.station.icao} (FAA NMS) — see the aviation screen (v)."
+        return ""
 
     # ── actions ─────────────────────────────────────────────────────────────
     def action_close(self) -> None:

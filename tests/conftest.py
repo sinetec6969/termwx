@@ -23,6 +23,16 @@ def load_text(name: str) -> str:
 
 
 @pytest.fixture(autouse=True)
+def no_notam_credentials(monkeypatch):
+    """Never reach the real FAA NMS from tests, whatever the developer's environment holds."""
+    from termwx.api import faa_notam
+
+    for var in (faa_notam.ENV_ID, faa_notam.ENV_SECRET, faa_notam.ENV_SERVER):
+        monkeypatch.delenv(var, raising=False)
+    faa_notam.forget_token()
+
+
+@pytest.fixture(autouse=True)
 def pinned_aviation_clock(monkeypatch):
     """Ages, validity windows and expiry are computed against the fixtures' recording time."""
     monkeypatch.setattr(aviation, "utcnow", lambda: FIXTURE_NOW)
@@ -55,9 +65,12 @@ ROUTES = [
     ("api.weather.gov/points/", "nws_points.json"),
     ("api.weather.gov/products/types/AFD", "nws_afd_list.json"),
     ("api.weather.gov/products/", "nws_afd.json"),
+    ("tfr.faa.gov/geoserver/TFR/ows", "faa_tfr_wfs.json"),
 ]
 TEXT_ROUTES = [
     ("aviationweather.gov/api/data/windtemp", "awc_windtemp_us.txt"),
+    ("tfr.faa.gov/download/detail_6_9169.xml", "faa_tfr_detail_6_9169.xml"),
+    ("tfr.faa.gov/download/detail_6_4348.xml", "faa_tfr_detail_6_4348.xml"),
 ]
 
 

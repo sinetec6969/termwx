@@ -21,9 +21,12 @@ from .aviation_models import (
     CloudLayer,
     Feed,
     MetarReport,
+    Notam,
     Pirep,
     TafForecast,
     TafPeriod,
+    Tfr,
+    TfrArea,
     WindsAloft,
 )
 from .render import ACCENT, DIM, LABEL
@@ -611,6 +614,144 @@ def pirep_detail(p: Pirep, now: datetime) -> Group:
 
 
 # ── winds aloft ──────────────────────────────────────────────────────────────
+# ── TFRs and NOTAMs ──────────────────────────────────────────────────────────
+def _tfr_alt(ft: int | None, ref: str) -> str:
+    if ft is None:
+        return "?"
+    if ref == "FL":
+        return f"FL{ft // 100:03d}"
+    return "SFC" if ft == 0 else f"{ft:,} {ref}"
+
+
+def area_altitudes(a: TfrArea) -> str:
+    """'SFC–400 AGL', '2,400 MSL–FL180'."""
+    lo, hi = _tfr_alt(a.base_ft, a.base_ref), _tfr_alt(a.top_ft, a.top_ref)
+    if lo == "SFC" and a.top_ref not in ("FL", ""):
+        return f"SFC–{hi}"
+    return f"{lo}–{hi}"
+
+
+def tfr_altitudes(t: Tfr) -> str:
+    if not t.areas:
+        return ""
+    if len(t.areas) == 1:
+        return area_altitudes(t.areas[0])
+    lo = t.floor
+    hi = max(t.areas, key=lambda a: a.top_ft or 0)
+    return f"{_tfr_alt(lo.base_ft, lo.base_ref)}–{_tfr_alt(hi.top_ft, hi.top_ref)} · {len(t.areas)} areas"
+
+
+def _validity(start: datetime | None, end: datetime | None, now: datetime) -> str:
+    """'from 23 1300Z', '42m left', 'until 01 Nov 0659Z' or ''."""
+    if start and start > now:
+        return f"from {start.strftime('%d %H%MZ')}"
+    if end is None:
+        return ""
+    if (end - now).total_seconds() > 48 * 3600:
+        return f"until {end.strftime('%d %b %H%MZ')}"
+    return f"{fmt_until(end, now)} left"
+
+
+def tfr_ident(t: Tfr) -> str:
+    return f"FDC {t.notam_id}" if t.notam_id[:1].isdigit() else t.notam_id
+
+
+def tfr_place(t: Tfr) -> str:
+    """'RALEIGH, NC, Thursday, October 15, 2026 through …' → 'RALEIGH, NC'."""
+    parts = t.title.split(", ")
+    return ", ".join(parts[:2]) if len(parts) > 2 else t.title
+
+
+def tfr_color(t: Tfr, now: datetime) -> str:
+    if not A.tfr_active(t, now, now):
+        return "#d670f0"  # later
+    return BAD if t.contains_point else WARN
+
+
+def tfr_card(tfr: Tfr, now: datetime) -> Text:
+    """'FDC 6/9169 · SECURITY · §99.7 · until 26 Oct 0330Z' over 'SFC–400 AGL  over your location  RALEIGH, NC…'."""
+    t = Text(no_wrap=True, overflow="ellipsis")
+    color = tfr_color(tfr, now)
+    t.append("■ ", style=color)
+    t.append(tfr_ident(tfr), style=f"bold {FG}")
+    t.append(f" · {tfr.legal or 'TFR'}", style=f"bold {color}")
+    if tfr.rule:
+        t.append(f" · §{tfr.rule}", style=DIM)
+    when = _validity(tfr.valid_from, tfr.valid_to, now)
+    if when:
+        t.append(f" · {when}", style=DIM)
+    t.append("\n  ")
+    alts = tfr_altitudes(tfr)
+    if alts:
+        t.append(f"{alts}  ", style=FG)
+    if tfr.contains_point:
+        t.append("over your location", style=f"bold {BAD if color == BAD else WARN}")
+    elif tfr.distance_nm is not None:
+        t.append(f"{tfr.distance_nm:.0f} NM away", style=DIM)
+    t.append(f"  {tfr_place(tfr)}", style=DIM)
+    return t
+
+
+def tfr_detail(t: Tfr, now: datetime) -> Group:
+    head = Text()
+    head.append(f" TFR · {t.legal or '?'} ", style=f"bold #0d1117 on {tfr_color(t, now)}")
+    head.append(f"  {tfr_ident(t)}", style=f"bold {FG}")
+    meta = Table.grid(padding=(0, 2))
+    meta.add_column(style=LABEL)
+    meta.add_column()
+    meta.add_row("Location", t.title or "--")
+    if t.rule:
+        meta.add_row("Rule", f"14 CFR §{t.rule}")
+    if t.valid_from or t.valid_to:
+        start = t.valid_from.strftime("%d %b %H%MZ") if t.valid_from else "?"
+        end = t.valid_to.strftime("%d %b %H%MZ") if t.valid_to else "until further notice"
+        when = _validity(t.valid_from, t.valid_to, now)
+        meta.add_row("Valid", f"{start} – {end}" + (f"  ({when})" if when else ""))
+    if t.scheduled:
+        meta.add_row("Schedule", "active only at scheduled times — see the text")
+    for a in t.areas:
+        meta.add_row(a.name or "Area", area_altitudes(a))
+    meta.add_row("Position", "covers your location" if t.contains_point else
+                 f"{t.distance_nm:.0f} NM from your location" if t.distance_nm is not None else "--")
+    if t.detail_error:
+        meta.add_row("Detail", Text(t.detail_error, style=WARN))
+    body = t.raw or "(full text unavailable — see tfr.faa.gov)"
+    return Group(head, Text(), meta, Text(), Text("Official text", style=LABEL), Text(body, style="#c9d1d9"))
+
+
+def notam_line(n: Notam, now: datetime) -> Text:
+    """'· 10/123 RWY · 3h12m left  RWY 18C/36C CLSD…'."""
+    t = Text(no_wrap=True, overflow="ellipsis")
+    future = n.valid_from is not None and n.valid_from > now
+    t.append("· ", style=DIM)
+    t.append(n.number or "?", style=f"bold {DIM if future else FG}")
+    if n.feature:
+        t.append(f" {n.feature}", style=ACCENT)
+    when = _validity(n.valid_from, n.valid_to, now)
+    if when:
+        t.append(f" · {when}", style=DIM)
+    t.append("  " + " ".join(n.text.split()), style=DIM if future else "#c9d1d9")
+    return t
+
+
+def notam_detail(n: Notam, now: datetime) -> Group:
+    head = Text()
+    head.append(" NOTAM ", style=f"bold #0d1117 on {ACCENT}")
+    head.append(f"  {n.number}", style=f"bold {FG}")
+    meta = Table.grid(padding=(0, 2))
+    meta.add_column(style=LABEL)
+    meta.add_column()
+    meta.add_row("Location", n.location or "--")
+    if n.classification:
+        meta.add_row("Class", n.classification)
+    if n.feature:
+        meta.add_row("Feature", n.feature)
+    start = n.valid_from.strftime("%d %b %H%MZ") if n.valid_from else "?"
+    end = n.valid_to.strftime("%d %b %H%MZ") if n.valid_to else "PERM / not given"
+    meta.add_row("Valid", f"{start} – {end}")
+    return Group(head, Text(), meta, Text(), Text("Official text", style=LABEL), Text(n.text or "(none supplied)", style="#c9d1d9"))
+
+
 WINDS_LEVELS = (3000, 6000, 9000, 12000, 18000, 24000, 30000, 34000, 39000)
 
 
@@ -696,7 +837,15 @@ def hazards_line(av: AviationResult, now: datetime) -> Text:
         t.append(f"{pir} PIREP{'s' if pir != 1 else ''}/{A.PIREP_RADIUS_NM}NM", style=FG if pir else DIM)
     if av.hazards.data is None and av.hazards.error:
         t.append(" · advisories unavailable", style=WARN)
-    if av.hazards.stale or av.pireps.stale:
+    tfrs = A.relevant_tfrs(av.tfrs.data, now) if av.tfrs.data else []
+    if tfrs:
+        over = any(x.contains_point and A.tfr_active(x, now, now) for x in tfrs)
+        t.append(" · ", style=DIM)
+        t.append(f"{len(tfrs)} TFR", style=f"bold {BAD}" if over else f"bold {WARN}")
+    if av.notams.data:
+        t.append(" · ", style=DIM)
+        t.append(f"{len(av.notams.data)} NOTAM", style=FG)
+    if av.hazards.stale or av.pireps.stale or av.tfrs.stale:
         t.append(" ⚠ cached", style=WARN)
     return t
 
@@ -771,7 +920,8 @@ def once_section(av: AviationResult, units: str, now: datetime) -> RenderableTyp
     if st.has_taf or av.taf.data:
         lines.append(taf_summary(av.taf.data, now))
     lines.append(hazards_line(av, now))
-    stale = [name for name, f in (("METAR", av.metars), ("TAF", av.taf), ("PIREP", av.pireps), ("hazards", av.hazards)) if f.stale]
+    stale = [name for name, f in (("METAR", av.metars), ("TAF", av.taf), ("PIREP", av.pireps), ("hazards", av.hazards),
+                                  ("TFR", av.tfrs), ("NOTAM", av.notams)) if f.stale]
     if stale:
         lines.append(Text(f"⚠ offline – cached {', '.join(stale)} shown", style=WARN))
     return Group(*lines)

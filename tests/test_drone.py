@@ -19,6 +19,8 @@ from termwx.aviation_models import (
     StationChoice,
     TafForecast,
     TafPeriod,
+    Tfr,
+    TfrArea,
 )
 from termwx.models import Alert, AlertsResult, Current, Hour, KpPoint, Location, SpaceWeather, Weather
 
@@ -46,12 +48,13 @@ def metar(**kw) -> MetarReport:
     return MetarReport(**base)
 
 
-def aviation(m: MetarReport | None = None, distance=5.0, taf=None, hazards=None) -> AviationResult:
+def aviation(m: MetarReport | None = None, distance=5.0, taf=None, hazards=None, tfrs=None) -> AviationResult:
     st = AviationStation("KCLT", "Charlotte/Douglas Intl", 35.21, -80.94, elev_m=228, has_taf=True)
     av = AviationResult(choice=StationChoice(st, "auto", distance_nm=distance, bearing=270))
     av.metars.ok([m or metar()], False, NOW)
     av.taf.ok(taf, False, NOW)
     av.hazards.ok(HazardSet(hazards or []), False, NOW)
+    av.tfrs.ok(tfrs or [], False, NOW)
     return av
 
 
@@ -246,6 +249,51 @@ def test_low_level_advisories_only_over_the_location():
     elsewhere = AviationHazard("G-AIRMET", "G-AIRMET SIERRA", "IFR", NOW, NOW + timedelta(hours=3),
                                polygon=square(CLT.lat + 3, CLT.lon))
     assert item(run(av=aviation(hazards=[elsewhere])), "advisories").status == D.GO
+
+
+def tfr(polygon, start=NOW - timedelta(hours=1), end=NOW + timedelta(hours=6), base=0, ref="AGL", **kw) -> Tfr:
+    return Tfr("6/1234", "HAZARDS", "CHARLOTTE, NC", polygons=[polygon], valid_from=start, valid_to=end,
+               areas=[TfrArea("Area A", base, ref, 3000, "MSL")], **kw)
+
+
+def test_tfr_over_the_location_is_no_go():
+    t = item(run(av=aviation(tfrs=[tfr(square(CLT.lat, CLT.lon, 0.02))])), "tfr")
+    assert t.status == D.NOGO and t.value == "inside FDC 6/1234" and "CHARLOTTE, NC" in t.notes[0]
+    assert item(run(av=aviation(tfrs=[])), "tfr").status == D.GO
+    # details missing: no altitudes, no times → treated as surface and active
+    bare = Tfr("6/1234", "VIP", "CHARLOTTE, NC", polygons=[square(CLT.lat, CLT.lon, 0.02)])
+    t = item(run(av=aviation(tfrs=[bare])), "tfr")
+    assert t.status == D.NOGO and "treated as surface" in t.notes[0]
+
+
+def test_tfr_timing_altitude_and_distance():
+    later = tfr(square(CLT.lat, CLT.lon, 0.02), start=NOW + timedelta(hours=5))  # default window is 2 h
+    assert item(run(av=aviation(tfrs=[later])), "tfr").status == D.CAUTION
+    expired = tfr(square(CLT.lat, CLT.lon, 0.02), start=NOW - timedelta(hours=3), end=NOW - timedelta(minutes=1))
+    assert item(run(av=aviation(tfrs=[expired])), "tfr").status == D.GO
+    high = tfr(square(CLT.lat, CLT.lon, 0.02), base=1000)  # 1,000 AGL floor, flying at 400
+    t = item(run(av=aviation(tfrs=[high])), "tfr")
+    assert t.status == D.CAUTION and "above 400 ft" in t.value
+    # MSL floor: KCLT is 228 m (748 ft), so 1,000 MSL ≈ 252 AGL reaches a 400 ft flight
+    assert item(run(av=aviation(tfrs=[tfr(square(CLT.lat, CLT.lon, 0.02), base=1000, ref="MSL")])), "tfr").status == D.NOGO
+    far_station = aviation(distance=30, tfrs=[tfr(square(CLT.lat, CLT.lon, 0.02), base=1000, ref="MSL")])
+    t = item(run(av=far_station), "tfr")
+    assert t.status == D.NOGO and "ground elevation is unknown" in t.notes[0]
+    near = tfr(square(CLT.lat + 0.06, CLT.lon, 0.02))  # southern edge ~2.4 NM north
+    t = item(run(av=aviation(tfrs=[near])), "tfr")
+    assert t.status == D.CAUTION and "NM" in t.value
+    assert item(run(av=aviation(tfrs=[tfr(square(CLT.lat + 0.5, CLT.lon, 0.02))])), "tfr").status == D.GO
+
+
+def test_tfr_feed_state():
+    av = aviation()
+    av.tfrs = Feed()
+    assert item(run(av=av), "tfr").status == D.UNKNOWN
+    av.tfrs.fail("HTTP 503 from tfr.faa.gov")
+    t = item(run(av=av), "tfr")
+    assert t.status == D.UNKNOWN and "503" in t.value
+    av.tfrs.ok([], True, NOW)
+    assert item(run(av=av), "tfr").status == D.CAUTION  # offline cache: new TFRs could be missing
 
 
 def test_station_distance_and_age():

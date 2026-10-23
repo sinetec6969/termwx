@@ -128,9 +128,13 @@ class AviationScreen(Screen[None]):
         self._rebuild_list(now, keep_list)
 
     def _notes(self, av: AviationResult) -> Group:
-        lines = [
-            Text("NOTAMs  ", style=LABEL) + Text(faa_notam.status(), style=DIM),
-        ]
+        lines = []
+        if not faa_notam.configured():
+            lines.append(Text("NOTAMs  ", style=LABEL) + Text(faa_notam.status(), style=DIM))
+        elif av.notams.error:
+            lines.append(Text(f"NOTAMs: {av.notams.error}", style="#ff9f43"))
+        if av.tfrs.error:
+            lines.append(Text(f"TFRs: {av.tfrs.error}", style="#ff9f43"))
         hz = av.hazards.data
         if hz and hz.errors:
             lines.append(Text("Partial advisories: " + "; ".join(hz.errors), style="#ff9f43"))
@@ -139,7 +143,8 @@ class AviationScreen(Screen[None]):
         lines += [
             Text(),
             Text(RA.DISCLAIMER, style="bold #c9d1d9"),
-            Text("Data: aviationweather.gov (NOAA/NWS Aviation Weather Center).", style=DIM),
+            Text("Data: aviationweather.gov (NOAA/NWS Aviation Weather Center) · TFRs: tfr.faa.gov (FAA)"
+                 + (" · NOTAMs: FAA NMS" if faa_notam.configured() else "") + ".", style=DIM),
             Text(),
             Text("c airport · h runway heading · [ ] cycle runways · r refresh · esc back", style=DIM),
         ]
@@ -168,6 +173,27 @@ class AviationScreen(Screen[None]):
         else:
             msg = "loading…" if not av.hazards.loaded else (av.hazards.error or "none in effect")
             options.append(Option(Text(f"  {msg}", style=DIM), disabled=True))
+
+        tfrs = A.relevant_tfrs(av.tfrs.data, now) if av.tfrs.data else []
+        header(f"TFRs within {A.TFR_NEAR_NM} NM of you", "⚠ cached" if av.tfrs.stale else "")
+        if tfrs:
+            for t in tfrs:
+                items.append(("tfr", t))
+                options.append(Option(RA.tfr_card(t, now), id=f"i{len(items) - 1}"))
+        else:
+            msg = "loading…" if not av.tfrs.loaded else (av.tfrs.error or "none published")
+            options.append(Option(Text(f"  {msg}", style=DIM), disabled=True))
+
+        if faa_notam.configured():
+            st = av.station
+            header(f"NOTAMs · {st.icao if st else '--'}", "⚠ cached" if av.notams.stale else "")
+            if av.notams.data:
+                for n in av.notams.data:
+                    items.append(("notam", n))
+                    options.append(Option(RA.notam_line(n, now), id=f"i{len(items) - 1}"))
+            else:
+                msg = "loading…" if not av.notams.loaded else (av.notams.error or "none in effect")
+                options.append(Option(Text(f"  {msg}", style=DIM), disabled=True))
 
         pireps = A.recent_pireps(av.pireps.data, now) if av.pireps.data else []
         header(f"PIREPs · {A.PIREP_RADIUS_NM} NM · {A.PIREP_MAX_AGE_H}h", "⚠ cached" if av.pireps.stale else "")
@@ -202,7 +228,8 @@ class AviationScreen(Screen[None]):
             return
         kind, obj = self._items[int(oid[1:])]
         now = A.utcnow()
-        detail = RA.hazard_detail(obj, now) if kind == "hazard" else RA.pirep_detail(obj, now)
+        render = {"hazard": RA.hazard_detail, "tfr": RA.tfr_detail, "notam": RA.notam_detail}.get(kind, RA.pirep_detail)
+        detail = render(obj, now)
         self.query_one("#av-detail", Static).update(detail)
         self.query_one("#av-detail-scroll").scroll_home(animate=False)
 

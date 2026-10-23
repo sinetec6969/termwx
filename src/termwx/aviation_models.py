@@ -247,6 +247,56 @@ class HazardSet:
 
 
 @dataclass
+class TfrArea:
+    name: str
+    base_ft: int | None
+    base_ref: str  # AGL | MSL | FL
+    top_ft: int | None
+    top_ref: str
+
+
+@dataclass
+class Tfr:
+    """A temporary flight restriction from tfr.faa.gov (outline + XNOTAM detail)."""
+
+    notam_id: str  # e.g. "6/9169" (FDC)
+    legal: str  # SECURITY | HAZARDS | VIP | UAS PUBLIC GATHERING | AIR SHOWS/SPORTS…
+    title: str
+    state: str = ""
+    facility: str = ""
+    polygons: list[list[tuple[float, float]]] = field(default_factory=list)  # (lat, lon)
+    # From the detail XML; None/empty when it couldn't be fetched:
+    valid_from: datetime | None = None
+    valid_to: datetime | None = None
+    rule: str = ""  # 14 CFR section, e.g. "91.137(a)(1)", "99.7"
+    areas: list[TfrArea] = field(default_factory=list)
+    scheduled: bool = False  # active only at scheduled times inside the validity window
+    raw: str = ""
+    detail_error: str = ""
+    # Filled in by applicability checks against the reference point:
+    contains_point: bool = False
+    distance_nm: float | None = None
+
+    @property
+    def floor(self) -> TfrArea | None:
+        """The area that reaches lowest."""
+        return min(self.areas, key=lambda a: a.base_ft or 0) if self.areas else None
+
+
+@dataclass
+class Notam:
+    """One NOTAM from the FAA NOTAM Management Service."""
+
+    number: str
+    location: str
+    text: str
+    classification: str = ""
+    feature: str = ""
+    valid_from: datetime | None = None
+    valid_to: datetime | None = None  # None = PERM or not given
+
+
+@dataclass
 class WindsAloftLevel:
     altitude_ft: int
     wind_dir: int | None  # None = light and variable
@@ -304,6 +354,8 @@ class AviationResult:
     pireps: Feed[list[Pirep]] = field(default_factory=Feed)
     hazards: Feed[HazardSet] = field(default_factory=Feed)
     winds: Feed[WindsAloft] = field(default_factory=Feed)
+    tfrs: Feed[list[Tfr]] = field(default_factory=Feed)  # measured from the weather location, not the station
+    notams: Feed[list[Notam]] = field(default_factory=Feed)
     notam_status: str = ""
 
     @property
