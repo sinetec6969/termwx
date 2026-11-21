@@ -1,26 +1,29 @@
 # termwx
 
-Terminal weather and aviation situational awareness: live conditions with an
-animated ASCII sky, 24–36h hourly graph, 3-day forecast, NWS severe weather
-alerts, a NOAA space weather dashboard, an aviation console with METAR/TAF,
-PIREPs, SIGMETs, G-AIRMETs, CWAs, TFRs, winds aloft and the NWS forecast discussion,
-a Part 107 drone go/no-go checklist, and a gpredict-style tracker for FM repeater and APRS
-amateur satellites. No API keys (NOTAMs are an opt-in extra).
+ok. ok ok ok. so this is a terminal weather and aviation situational awareness thing and it
+does, uh, everything? live conditions with an animated ASCII sky (yes the clouds move, yes
+i spent too long on that), 24–36h hourly graph, 3-day forecast, NWS severe weather alerts,
+a NOAA space weather dashboard, an aviation console with METAR/TAF, PIREPs, SIGMETs,
+G-AIRMETs, CWAs, TFRs, winds aloft and the NWS forecast discussion, a Part 107 drone
+go/no-go checklist, and — as of roughly hour 38 of being awake — a gpredict-style tracker
+for FM repeater and APRS amateur satellites. no API keys. (NOTAMs are opt-in. we'll get there.
+everything is fine.)
 
 ![termwx dashboard showing current conditions, the night sky, hourly graph, 3-day forecast, an alert banner, and the aviation, drone go/no-go and space weather panels](docs/screenshot.png)
 
 <sub>Live data for Charlotte, NC on an October evening, launched with <code>--demo-alert</code> to show the alert banner.
-The drone panel reads NO-GO because it is after dark and the demo includes a Severe Thunderstorm Warning.</sub>
+The drone panel reads NO-GO because it is after dark and the demo includes a Severe Thunderstorm Warning.
+(it was right. i did not fly the drone. i made more coffee.)</sub>
 
 ## Install
 
-Linux and macOS, one line:
+Linux and macOS. one line. ONE. LINE.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/sinetec6969/termwx/HEAD/install.sh | sh
 ```
 
-Or from a clone:
+or from a clone if you're the read-the-script-first type (respect, honestly):
 
 ```sh
 git clone https://github.com/sinetec6969/termwx.git
@@ -28,26 +31,28 @@ cd termwx
 ./install.sh
 ```
 
-The installer:
+the installer, in order, while i go refill the mug:
 - finds Python 3.11+;
 - installs termwx into its own virtual environment in `~/.local/share/termwx`;
 - links the `termwx` command into `~/.local/bin`;
-- adds that directory to your PATH (in `.zshrc`, `.bashrc`, fish `conf.d` or `.profile`, depending on your shell);
+- adds that directory to your PATH (in `.zshrc`, `.bashrc`, fish `conf.d` or `.profile`, whichever shell you've chosen to live in);
 - runs `termwx setup`, which asks for:
-  - your ZIP code, city or lat,lon (or detects it by IP);
+  - your ZIP code, city or lat,lon (or just detects it by IP, it's fine, it's fine);
   - °F or °C;
-  - your airport: the nearest one automatically, or pick one from a list;
-  - notification and animation preferences.
+  - your airport: the nearest one automatically, or pick one off a list;
+  - notification and animation preferences;
+  - whether you want the satellite pass panel, and how often to reload TLEs.
 
-Open a new terminal afterwards and run `termwx`.
+open a new terminal afterwards and run `termwx`. that's it. go outside. or don't. i haven't.
 
-- **Change settings:** `termwx setup` any time.
-- **Upgrade:** run the installer again. Your settings are kept.
-- **Uninstall:** `./install.sh --uninstall`, or `curl … | sh -s -- --uninstall`. This removes the program, the command link and the PATH lines, and keeps your settings unless you add `--purge`.
-- **Other options:** `--no-setup` skips the questions, and `--ref <tag>` installs a specific tag or branch. `TERMWX_HOME` and `TERMWX_BIN_DIR` change where it installs.
+- **Change settings:** `termwx setup` whenever.
+- **Upgrade:** run the installer again. your settings survive. they're tougher than i am right now.
+- **Uninstall:** `./install.sh --uninstall`, or `curl … | sh -s -- --uninstall`. removes the program, the command link and the PATH lines, and keeps your settings unless you add `--purge`.
+- **Other options:** `--no-setup` skips the questions, `--ref <tag>` installs a specific tag or branch. `TERMWX_HOME` and `TERMWX_BIN_DIR` change where it installs.
 
-Requires Python 3.11+ (on Debian/Ubuntu also `python3-venv`) and a terminal with truecolor +
-Unicode (most modern terminals).
+needs Python 3.11+ (on Debian/Ubuntu also `python3-venv`, ask me how i know) and a terminal with
+truecolor + Unicode (most modern terminals; if yours shows boxes instead of arrows that's a font
+problem and also a you problem, lovingly).
 
 ## Usage
 
@@ -61,7 +66,7 @@ termwx --once --aviation        # …with a larger aviation snapshot (METAR, TAF
 termwx --airport KCLT           # use this aviation station instead of the nearest one (saved)
 termwx --airport auto           # back to the nearest METAR station
 termwx --demo-alert             # inject sample alerts to preview the alert UI
-termwx --no-anim                # static sky
+termwx --no-anim                # static sky (for the calm among us. not me. i can hear colors.)
 ```
 
 ### Keys
@@ -81,63 +86,72 @@ termwx --no-anim                # static sky
 | `r` | refresh now |
 | `p` | pause animation |
 | `V` | send out the sky visitor now |
-| `?` | help · `q` quit |
+| `?` | help · `q` quit (you won't) |
 
-On the aviation screen: `c` choose airport (ICAO; blank = nearest), `h` enter a runway
+on the aviation screen: `c` choose airport (ICAO; blank = nearest), `h` enter a runway
 number or magnetic heading, `[` / `]` cycle published runways, `r` refresh, `esc` back.
 
-On the drone screen: `space` / `enter` tick a preflight item, `+` / `-` widen or narrow the
+on the drone screen: `space` / `enter` tick a preflight item, `+` / `-` widen or narrow the
 flight window, `t` set the planned altitude, `x` clear the ticks, `r` refresh, `esc` back.
+
+on the satellite screen: `U` update TLEs right now, `i` change the TLE reload interval, `e` minimum
+pass elevation, `[` / `]` step through passes, `esc` back.
 
 ## What's on screen
 
+everything. ok fine, specifically:
+
 - **Now** — big temperature, feels-like, today's high/low, wind + gusts + direction,
   humidity/dew point, pressure with its *forecast* change over the next 3 hours (labelled
-  `fcst` — model output, not a measured pressure tendency), UV, visibility, US AQI, cloud
-  cover, sunrise/sunset, moon phase.
+  `fcst` because it's model output, NOT a measured pressure tendency, i will die on this hill,
+  i am already most of the way up it), UV, visibility, US AQI, cloud cover, sunrise/sunset,
+  moon phase.
 - **Sky** — animated scene driven by current conditions: sun/moon, clouds drifting with the
   wind, rain slanting with wind direction, snow, drizzle, fog bands, lightning, stars at night.
-  Every 8–15 minutes a little visitor runs out of the house and holds up a sign: an
+  every 8–15 minutes a little visitor runs out of the house and holds up a sign: an
   inspirational quote, fun fact, trivia question, dinner idea, top news headline or joke,
-  pulled live from free APIs (built-in lines if you're offline). Press `V` to call one now.
-- **Next hours** — temperature graph colored on a cold→hot ramp, precip-chance bars, condition glyphs.
+  pulled live from free APIs (built-in lines if you're offline). press `V` to summon one. he's
+  the only one here who's slept.
+- **Next hours** — temperature graph on a cold→hot ramp, precip-chance bars, condition glyphs.
 - **3-Day Forecast** — wttr.in-style icon cards with highs/lows, precip chance and amount, wind, UV.
-- **NWS Alerts** — active watches/warnings/advisories for your exact point. New alerts
+- **NWS Alerts** — active watches/warnings/advisories for your exact point. new alerts
   ring the terminal bell, pop a toast, and send a desktop notification (`notify-send`).
-  Extreme/Severe alerts pulse the banner.
+  Extreme/Severe alerts pulse the banner. like my eyelid. right now.
 - **Space Weather** — NOAA G/S/R scales, planetary Kp (observed + 3-day forecast), real-time
   solar wind speed/density, IMF Bt/Bz, GOES X-ray flare class, F10.7, OVATION aurora probability
   overhead and on your horizon, 3-day storm/blackout probabilities, latest SWPC bulletin.
-  SWPC warnings at G3/S3/R3 or higher from the last 24h also appear in the alert banner.
-  The NWS Alerts panel also shows when the local Area Forecast Discussion was issued.
-- **Aviation** — a four-line summary of the nearest aviation station: identifier, flight
+  SWPC warnings at G3/S3/R3 or higher from the last 24h also show up in the alert banner.
+  the NWS Alerts panel also shows when the local Area Forecast Discussion was issued.
+- **Aviation** — four-line summary of the nearest aviation station: identifier, flight
   category and report age, wind/visibility/clouds, TAF trend, and counts of SIGMETs,
-  AIRMETs, PIREPs and TFRs nearby (plus NOTAMs when configured). Press `v` for the full picture.
+  AIRMETs, PIREPs and TFRs nearby (plus NOTAMs when configured). `v` for the whole thing.
 - **Drone go/no-go** — the overall verdict for the next flight window, the worst reasons,
-  and how many preflight items are ticked. Press `g` for the checklist.
-- **Satellites** — FM repeater and APRS satellites overhead now (az/el and Doppler-corrected
-  downlink), then the next passes with AOS time, countdown and peak elevation, and how old
-  the TLEs are. Press `o` for the tracker.
+  and how many preflight items are ticked. `g` for the checklist.
+- **Satellites** — FM repeater and APRS satellites overhead RIGHT NOW (az/el and
+  Doppler-corrected downlink), then the next passes with AOS time, countdown and peak
+  elevation, plus how old the TLEs are. `o` for the tracker. it's so good. i'm so tired.
 
 ## Aviation
 
 termwx picks the nearest METAR-reporting station to your weather location (within 75 NM,
-preferring one that also issues a TAF if it is only slightly farther), once per location —
-not on every refresh. The station and its distance/direction from you are always shown.
-If nothing suitable is close, the aviation panel says so instead of quietly using a distant
-airport. `--airport KCLT` (or `c` on the aviation screen) overrides the choice.
+preferring one that also issues a TAF if it's only slightly farther), once per location —
+not on every refresh, we're not animals. the station and its distance/direction from you are
+always shown. if nothing suitable is close, the aviation panel says so instead of quietly
+using some airport three counties over. `--airport KCLT` (or `c` on the aviation screen)
+overrides it.
 
-The aviation screen (`v`) shows:
+the aviation screen (`v`) shows:
 
 - **Header** — `KCLT · Charlotte/Douglas Intl · 6 mi W`, the observation age, and an
   offline/cached warning when applicable.
 - **METAR** — flight category (VFR / MVFR / IFR / LIFR), METAR or SPECI and its age, wind,
   visibility, ceiling, clouds, weather, temperature/dew point, altimeter, the measured 3-hour
-  pressure tendency when reported, and the raw report.
+  pressure tendency when reported (THAT one's measured. see? i'm consistent. barely.), and
+  the raw report.
 - **Field tools** — density altitude (field elevation, temperature, altimeter and dew point);
   a headwind/crosswind calculator for a runway (published runways come from AWC's FAA-sourced
   airport data, otherwise enter a runway or heading with `h`; METAR wind, reported in degrees
-  true, is converted to magnetic using the airport's published variation); and the last six
+  true, gets converted to magnetic using the airport's published variation); and the last six
   observations with a rule-based improving / steady / deteriorating trend.
 - **TAF timeline** — one row per FM/BECMG/TEMPO/PROB group with category, wind, visibility,
   clouds and weather, marking deteriorating (▼) and improving (▲) changes, a one-line outlook
@@ -147,26 +161,27 @@ The aviation screen (`v`) shows:
   lower 48, and Center Weather Advisories that cover the station or come within 50 NM, as
   compact cards with altitudes, time left and movement. PIREPs/AIREPs within 100 NM from the
   last 3 hours, severe/urgent first, then moderate turbulence/icing, then low ceilings or
-  weather, then the rest by distance and age. Select any item for the full official text.
+  weather, then the rest by distance and age. select any item for the full official text.
 - **TFRs** — temporary flight restrictions whose outline covers your location or comes
-  within 30 NM, from the FAA's published TFR feeds at tfr.faa.gov (no key). Each card shows
+  within 30 NM, from the FAA's published TFR feeds at tfr.faa.gov (no key). each card shows
   the NOTAM number, type (security, hazards, VIP, UAS public gathering, air show/sports),
   14 CFR section, altitudes per area, validity and distance; select one for the full NOTAM
   text. TFR distances are measured from your weather location, not the airport.
 - **NOTAMs** — the airport's NOTAMs from the FAA NOTAM Management Service, when configured
-  (see below).
+  (see below, see below, scroll, keep going).
 - **Winds aloft** — forecast wind and temperature at 3,000–24,000 ft from the nearest FD
   site, highlighting strong winds, levels near 0 °C, large direction changes, and an
   interpolated freezing level.
 
-**This is weather information, not a flight-planning product.** It does not replace an
-official preflight weather briefing, NOTAMs, or the formal products they are drawn from.
+**This is weather information, not a flight-planning product.** I'm serious, even at hour 42.
+It does not replace an official preflight weather briefing, NOTAMs, or the formal products
+they're drawn from.
 
 ### NOTAMs (opt-in)
 
-The FAA's NOTAM Management Service (NMS) API is free but not self-serve: email
-**NOTAMS@faa.gov** to request API access. Once you have a client ID and secret, set them in
-the environment (never in `config.toml`):
+the FAA's NOTAM Management Service (NMS) API is free but not self-serve: email
+**NOTAMS@faa.gov** to request API access, then wait, then refresh your inbox, then wait. once
+you have a client ID and secret, put them in the environment (never in `config.toml`):
 
 ```sh
 export FAA_NOTAM_CLIENT_ID=…
@@ -176,13 +191,13 @@ export FAA_NOTAM_ENV=staging   # optional: staging or fit if the FAA gave you te
 
 termwx then signs in (OAuth client credentials, token kept in memory only), fetches the
 aviation station's NOTAMs every 5 minutes, lists them on the aviation screen and counts them
-in the summary. NOTAM responses are never written to the disk cache. Without credentials the
-aviation screen says how to get them, and nothing is requested. termwx does not scrape the
-FAA's NOTAM search pages.
+in the summary. NOTAM responses never get written to the disk cache. without credentials the
+aviation screen tells you how to get them and requests nothing. termwx does not scrape the
+FAA's NOTAM search pages. i thought about it at 3am. i did not do it.
 
-The NMS response parser follows the documented GeoJSON shape but hasn't been checked
-against a live NMS response yet. If NOTAMs show "unexpected response format", that's
-where to look.
+the NMS response parser follows the documented GeoJSON shape but hasn't been checked
+against a live NMS response yet. if NOTAMs say "unexpected response format", that's where
+to look. sorry in advance.
 
 ## Drone go/no-go
 
@@ -190,15 +205,16 @@ where to look.
 
 <sub>The same evening: night and the demo thunderstorm warning are NO-GO, and 4 of 10 preflight items are ticked.</sub>
 
-The `g` screen scores a Part 107 flight from now through the next 2 hours (`+` / `-` to
-change, up to 12). It has two parts:
+the `g` screen scores a Part 107 flight from now through the next 2 hours (`+` / `-` to
+change, up to 12). two parts:
 
-- **Weather, scored automatically** from the data termwx already has.
-- **Preflight**, a manual checklist of what termwx can't know.
+- **Weather, scored automatically** from data termwx already has.
+- **Preflight**, a manual checklist of the stuff termwx can't possibly know.
 
-Every weather item is GO, CAUTION, NO-GO or UNKNOWN. Where two sources describe the same
-thing, such as the point forecast and the airport METAR, the **worse one counts** and is
-named. TEMPO and PROB groups in a TAF can raise CAUTION but never NO-GO on their own.
+every weather item is GO, CAUTION, NO-GO or UNKNOWN. where two sources describe the same
+thing, like the point forecast and the airport METAR, the **worse one counts** and gets
+named. pessimism, but make it a feature. TEMPO and PROB groups in a TAF can raise CAUTION
+but never NO-GO on their own.
 
 | check | from | NO-GO | CAUTION |
 |---|---|---|---|
@@ -218,9 +234,9 @@ named. TEMPO and PROB groups in a TAF can raise CAUTION but never NO-GO on their
 | Density altitude | METAR | — | 5,000 ft or higher |
 | Observation station | METAR | — | more than 10 NM away, more than 75 min old, or offline |
 
-Missing data is never treated as GO: an UNKNOWN item makes the verdict at least CAUTION. If
-all the weather is GO but preflight items are still unticked, the verdict is **NOT READY**.
-The preflight items are:
+missing data is never treated as GO. never. an UNKNOWN item makes the verdict at least
+CAUTION. if all the weather is GO but preflight items are still unticked, the verdict is
+**NOT READY**. the preflight items:
 - certificate
 - registration
 - Remote ID
@@ -230,49 +246,56 @@ The preflight items are:
 - visual line of sight
 - aircraft
 - batteries
-- pilot fitness
+- pilot fitness (i would currently fail this one)
 
-Ticks last for the session only, and they clear when you change location.
+ticks last for the session only, and they clear when you change location.
 
-Limits live in the `[drone]` table of `config.toml` (see Configuration). Values that would
-fall below a Part 107 floor are clamped to it. Visibility can't go below 3 SM and altitude
-can't go above 400 ft.
+limits live in the `[drone]` table of `config.toml` (see Configuration). values that would
+fall below a Part 107 floor get clamped to it. visibility can't go below 3 SM and altitude
+can't go above 400 ft. no, you can't talk it into it. i tried.
 
-**Advisory only.** The remote pilot in command is responsible for the go/no-go decision
-(§107.19). termwx checks published TFR outlines, but it cannot check airspace, and stadium
-(§99.7 blanket) restrictions and most other NOTAMs aren't in the TFR feed. The airspace and
-NOTAM items stay manual.
+**Advisory only.** No jokes here: the remote pilot in command is responsible for the go/no-go
+decision (§107.19). termwx checks published TFR outlines, but it cannot check airspace, and
+stadium (§99.7 blanket) restrictions and most other NOTAMs aren't in the TFR feed. The
+airspace and NOTAM items stay manual.
 
 ## Satellites
 
-`o` opens a tracker for every active amateur **FM voice repeater** and **APRS digipeater**
-satellite, built along the lines of gpredict (its features reimplemented in Python with the
-[`sgp4`](https://pypi.org/project/sgp4/) library, not ported from its code):
+NEW. brand new. still warm. `o` opens a tracker for every active amateur **FM voice
+repeater** and **APRS digipeater** satellite, built along the lines of gpredict (its features
+reimplemented in Python with the [`sgp4`](https://pypi.org/project/sgp4/) library, not
+ported from its code — gpredict is GPL and i am tired, not reckless):
 
-- **Which satellites:** the SatNOGS DB transmitter list: transmitters marked alive that are an
-  FM repeater with an uplink, or an AFSK APRS digipeater. Linear transponders, command
-  channels and geostationary satellites (QO-100) are left out, and SatNOGS names are used
-  (AO-91, PO-101, SO-50…).
-- **Left:** the list, with satellites in view first (live az/el), then by next AOS.
+- **Which satellites:** pulled from the SatNOGS DB transmitter list: transmitters marked alive
+  that are an FM repeater with an uplink, or an AFSK APRS digipeater. linear transponders,
+  command channels and geostationary satellites (QO-100, which never "passes", it just sits
+  there, judging you) are left out, and SatNOGS names are used (AO-91, PO-101, SO-50…), so
+  you don't have to know that "OBJECT T" is VO-96. now you know. you're welcome.
+- **Left:** the list, satellites in view first (live az/el), then sorted by next AOS.
 - **Right, for the highlighted satellite:**
   - live azimuth, elevation, range, range rate and sub-satellite point;
   - every uplink and downlink with the Doppler-corrected **tx** (what to transmit) and
     **rx** (where to listen) frequencies, live while it's up and at AOS otherwise, plus the
-    CTCSS tone;
+    CTCSS tone, so you can preset the radio before the bird comes over the horizon instead of
+    fumbling the VFO like i did at 4am;
   - the next 24 hours of passes (AOS, LOS, duration, peak elevation, direction);
-  - an ASCII polar sky plot of the selected pass, with `[` `]` to step between passes.
+  - an ASCII polar sky plot of the selected pass, `[` `]` to step between passes.
 
-**TLEs** come from CelesTrak. They load when termwx starts, then every 3 hours by default:
-- **Change the interval:** `i` in the tracker, or `termwx setup`. The range is 2–168 h.
-- **Update now:** `U` or the **Update TLEs now** button.
+the math got checked against an independent live ISS position and landed within about
+600 m. i yelled. the neighbors are aware of me now.
 
-CelesTrak only publishes new elements about every 2 hours and blocks clients that keep
-re-downloading unchanged data. So if the saved TLEs are less than 2 hours old, startup uses
-them, and the automatic interval can't go below 2 h. A failed update keeps the saved TLEs and
-says so in the panel; termwx retries 15 minutes later.
+**TLEs** come from CelesTrak. they load when termwx starts, then every 3 hours by default:
+- **Change the interval:** `i` in the tracker, or `termwx setup`. range is 2–168 h.
+- **Update now:** `U`, or the big **Update TLEs now** button. go ahead. press it. it feels great.
 
-`e` sets the minimum elevation for a usable pass (default 10°). As in gpredict, AOS and LOS
-are still the horizon crossings; passes that peak lower are hidden.
+important, please read even if you're skimming (i'm skimming): CelesTrak only publishes new
+elements about every 2 hours and **blocks clients that keep re-downloading unchanged data**.
+so if the saved TLEs are less than 2 hours old, startup just uses them, and the automatic
+interval can't go below 2 h. restart termwx forty times in a row, it won't get your IP banned.
+a failed update keeps the saved TLEs, says so in the panel, and retries 15 minutes later.
+
+`e` sets the minimum elevation for a usable pass (default 10°). like gpredict, AOS and LOS
+are still the horizon crossings; passes that peak lower than your minimum just get hidden.
 
 ## Refresh & offline
 
@@ -292,23 +315,23 @@ are still the horizon crossings; passes that peak lower are hidden.
 | Satellite transmitter list (SatNOGS) | daily, or on a forced update |
 | Satellite passes | every 5 min, and when the location or minimum elevation changes |
 
-Every product is fetched and cached independently in `~/.cache/termwx`: a PIREP outage never
-takes down METARs, weather or space weather. If the network drops, the last data is shown and
-marked: the top bar says **offline – showing cached data**, and every aviation product that
-came from the cache says **offline · cached Nm ago**. Observation and issue ages are always
-shown (`METAR 2h18m old` turns amber after 75 minutes and red after 3 hours), expired
-advisories are dropped even from the cache, and an expired TAF is labelled as such — old
-aviation data is never presented as current.
+every product is fetched and cached on its own in `~/.cache/termwx`: a PIREP outage never
+takes down METARs, weather or space weather. if the network drops, the last data stays up and
+gets marked: the top bar says **offline – showing cached data**, and every aviation product
+that came from the cache says **offline · cached Nm ago**. observation and issue ages are
+always shown (`METAR 2h18m old` turns amber after 75 minutes and red after 3 hours), expired
+advisories get dropped even from the cache, and an expired TAF is labelled as expired. old
+aviation data is never, ever presented as current. that's the one thing i'm not sleepy about.
 
 termwx is a polite client of the Aviation Weather Center's Data API: it identifies itself
 with a descriptive User-Agent, uses only documented parameters, asks for small, targeted
 results, makes about one request per minute on average (far below AWC's 100 requests/minute
 limit), treats HTTP 204 as "no data" rather than an error, and backs off to the cache on
-HTTP 429.
+HTTP 429. more polite than me at a 6am gas station, honestly.
 
 ## Configuration
 
-`~/.config/termwx/config.toml` (written automatically):
+`~/.config/termwx/config.toml` (written automatically, you don't have to touch it, but you will):
 
 ```toml
 units = "imperial"      # or "metric"
@@ -353,6 +376,8 @@ timezone = "America/New_York"
 
 ## Data sources
 
+all free, all wonderful, all of them deserve a nap more than i do:
+
 | | |
 |---|---|
 | Forecast, air quality, geocoding | [Open-Meteo](https://open-meteo.com/) (CC BY 4.0, non-commercial) |
@@ -366,19 +391,24 @@ timezone = "America/New_York"
 | IP location | [ipinfo.io](https://ipinfo.io/) (fallback ipapi.co) |
 | Sky visitor signs | ZenQuotes, DummyJSON, Advice Slip, catfact.ninja, Dog API, Useless Facts, Wikipedia On This Day, Open Trivia DB, TheMealDB, NPR & BBC RSS, icanhazdadjoke, JokeAPI, Official Joke API, chucknorris.io, kanye.rest |
 
-The satellite tracker follows [gpredict](https://github.com/csete/gpredict)'s design.
-Inspired by [wttr.in](https://github.com/chubin/wttr.in), weathr, weather-tui and Stormy.
+the satellite tracker follows [gpredict](https://github.com/csete/gpredict)'s design.
+inspired by [wttr.in](https://github.com/chubin/wttr.in), weathr, weather-tui and Stormy.
+fueled by drip coffee, gas station espresso, and a pack of something i said i quit.
 
 ## Project status
 
-**Version 0.3.0** adds three things to the 0.2 aviation console and drone checklist:
-- TFRs from the FAA, with no key needed;
+**Version 0.3.0** added three things to the 0.2 aviation console and drone checklist:
+- TFRs from the FAA, no key needed;
 - opt-in NOTAMs from the FAA NOTAM Management Service;
 - the Linux/macOS installer with `termwx setup`.
 
-Everything listed above is implemented. The 191 tests
-pass against recorded fixtures. The app has been run against the live services for
-Charlotte, Denver and Tampa, and the drone checklist for Charlotte, Cheyenne and Seattle.
+and then, since 0.3.0, on `master`, at an hour i will not disclose:
+- the FM/APRS amateur satellite tracker (`o`), with TLE auto-reload and a force-update button.
+
+everything listed above is implemented. all 216 tests pass against recorded fixtures (i ran
+them four times. not because they failed. because i didn't believe it). the app has been run
+against the live services for Charlotte, Denver and Tampa, and the drone checklist for
+Charlotte, Cheyenne and Seattle.
 
 | area | status |
 |---|---|
@@ -399,30 +429,36 @@ Charlotte, Denver and Tampa, and the drone checklist for Charlotte, Cheyenne and
 | TFRs: aviation screen, summary count, drone check, `--once --aviation` | done (new in 0.3) |
 | Installer (`install.sh`) and `termwx setup` | done (new in 0.3); tested on Linux (bash, dash, zsh); not yet run on macOS or under fish |
 | NOTAMs via FAA NMS | done, opt-in through environment variables; not yet verified against a live NMS response |
+| Satellite tracker (`o`): FM/APRS list, live az/el, Doppler, passes, sky plot, TLE refresh | done (new since 0.3); checked headless against live data, not yet hammered in an interactive terminal |
 
 ### Known limitations
 
-- **Station choice is a heuristic.** It takes the nearest METAR site within 75 NM and prefers
-  a TAF site that is up to 8 NM farther. That can pick a field you wouldn't (downtown Denver
-  gets Buckley SFB, not KDEN). Use `--airport` or `c` to override.
+things that are not perfect, listed by someone who is also not perfect:
+
+- **Station choice is a heuristic.** it takes the nearest METAR site within 75 NM and prefers
+  a TAF site up to 8 NM farther. that can pick a field you wouldn't (downtown Denver
+  gets Buckley SFB, not KDEN). use `--airport` or `c` to override.
 - **Domestic non-convective SIGMETs** (e.g. `SIGMET NOVEMBER 3`) are only tested with a
-  hand-built record. None were active when the fixtures were recorded.
+  hand-built record. none were active when the fixtures were recorded.
 - **G-AIRMETs** show the current snapshot only, not the 3/6/9/12-hour forecast snapshots.
-  Freezing-level lines are parsed but not used to decide which advisories apply.
-- **Alaska AIRMETs** show zone, hazard and times only. The API doesn't supply their text.
+  freezing-level lines are parsed but not used to decide which advisories apply.
+- **Alaska AIRMETs** show zone, hazard and times only. the API doesn't supply their text.
 - **TAF icing and turbulence groups** are parsed but not yet shown in the timeline (the raw
   TAF below it has them).
 - **Winds aloft** use the low-level bulletin. 22 of 233 bulletin sites (mostly offshore grid
-  points) have no coordinates in `fd_sites.json` and are never chosen. Levels above 24,000 ft
+  points) have no coordinates in `fd_sites.json` and are never chosen. levels above 24,000 ft
   are parsed but not displayed.
 - **Runway headings** come from runway numbers (18 → 180°), not surveyed headings, which is
   the usual approximation for crosswind estimates.
-- **PIREP search radius:** AWC doesn't document the unit of its `distance` parameter, so termwx
-  over-asks slightly and trims to 100 NM itself.
-- **TFR schedules:** TFRs that are only active at scheduled times (e.g. "DLY 1300-0330") are
-  treated as active for their whole validity window and flagged; read the NOTAM text.
+- **PIREP search radius:** AWC doesn't document the unit of its `distance` parameter (why), so
+  termwx over-asks slightly and trims to 100 NM itself.
+- **TFR schedules:** TFRs only active at scheduled times (e.g. "DLY 1300-0330") are treated
+  as active for their whole validity window and flagged; read the NOTAM text.
 - **US coverage only** for NWS alerts and forecast discussions. METAR/TAF and international
   SIGMETs work elsewhere, but have only been checked for US locations.
+- **Satellite list is only as good as SatNOGS.** if a transmitter is marked alive there, it
+  shows up here, even if the bird has been quiet for a month. a satellite with a brand-new
+  SatNOGS temporary ID and no real NORAD number yet won't show until it gets one.
 
 ### Code layout
 
@@ -449,11 +485,15 @@ Charlotte, Denver and Tampa, and the drone checklist for Charlotte, Cheyenne and
 
 ### Possible next steps
 
+(after sleep. after SO much sleep.)
+
 - Check the NMS NOTAM parser against a live response once credentials arrive.
 - Showing TAF icing/turbulence groups and G-AIRMET forecast snapshots.
 - A `--once --go` drone snapshot whose exit code reflects the verdict, for scripts.
 - Per-aircraft drone limit profiles.
 - A configurable density-altitude caution (5,000 ft is always flagged at high-elevation fields).
+- Satellite pass notifications ("SO-50 up in 5 min"), and maybe rigctld/rotctld Doppler
+  control so the radio follows along by itself. it's 5am. this seems extremely reasonable.
 
 ## Development
 
@@ -464,11 +504,15 @@ python3 -m venv .venv
 .venv/bin/termwx
 ```
 
-Tests run entirely against recorded API responses in `tests/fixtures/` (no network access),
-including Textual Pilot tests of the location search, units toggle, alerts, space weather,
-aviation and forecast discussion screens. Aviation fixtures were recorded on 2026-10-07 and
-the tests pin the aviation clock to that time.
+tests run entirely against recorded API responses in `tests/fixtures/` (no network access,
+which is more than i can say for myself), including Textual Pilot tests of the location
+search, units toggle, alerts, space weather, aviation, forecast discussion and satellite
+screens. aviation fixtures were recorded on 2026-10-07 and the tests pin the aviation clock to
+that time. the test suite points `XDG_CACHE_HOME` at a temp dir, so it never touches your
+real cache or your saved TLEs.
 
-Winds-aloft bulletins name their sites only by identifier, so termwx ships their coordinates
-in `src/termwx/data/fd_sites.json`. Regenerate it from AWC station data with
+winds-aloft bulletins name their sites only by identifier, so termwx ships their coordinates
+in `src/termwx/data/fd_sites.json`. regenerate it from AWC station data with
 `.venv/bin/python scripts/build_fd_sites.py`.
+
+ok. that's the readme. i'm going to lie down. i'm not going to sleep but i'm going to lie down.
