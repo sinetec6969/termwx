@@ -325,6 +325,8 @@ HELP = """\
 [b]d[/]  NWS Area Forecast Discussion (aviation section first)
 [b]g[/]  drone go/no-go: Part 107 weather checks + preflight checklist
      [dim]in there: space tick · + / - window · t altitude · x clear ticks[/dim]
+[b]o[/]  satellites: FM repeaters + APRS digipeaters, live az/el, Doppler, passes, sky plot
+     [dim]in there: U update TLEs now · i TLE reload interval · e min elevation · [ ] passes[/dim]
 [b]r[/]  refresh everything now
 [b]p[/]  pause / resume animation
 [b]V[/]  send out the sky visitor now (quotes, facts, jokes, news…)
@@ -332,9 +334,10 @@ HELP = """\
 
 [dim]Data: Open-Meteo (forecast, AQI, geocoding) · NWS api.weather.gov (alerts, AFD)
 NOAA SWPC (space weather) · aviationweather.gov (aviation) · ipinfo.io (auto-locate)
+CelesTrak (TLEs) · SatNOGS DB (satellite transmitters)
 
 Refresh: weather 10m · alerts 2m · space 5m · METAR 5m · TAF 10m
-hazards & PIREPs 5m · AFD 20m · winds aloft 30m
+hazards & PIREPs 5m · AFD 20m · winds aloft 30m · TLEs at start, then every 3h (o → i)
 
 Pressure arrow = forecast change over the next 3h, not a measured tendency.
 Aviation data is information only — not an official preflight briefing.[/dim]

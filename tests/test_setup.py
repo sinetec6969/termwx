@@ -38,28 +38,29 @@ async def wizard(tmp_path, *answers, cfg: Config | None = None, http=None) -> tu
 
 
 async def test_zip_code_auto_airport_and_defaults(tmp_path):
-    #                               ZIP     confirm units airport  4 prefs
-    code, _, out = await wizard(tmp_path, "28202", "", "", "", "", "", "", "")
+    #                               ZIP     confirm units airport  4 prefs         sat panel, TLE hours
+    code, _, out = await wizard(tmp_path, "28202", "", "", "", "", "", "", "", "", "")
     assert code == 0 and "← auto picks this" in out and "KCLT" in out
     back = Config.load(tmp_path / "config.toml")
     assert back.location.name == "Charlotte" and back.location.timezone == "America/New_York"
     assert back.units == U.IMPERIAL and back.aviation_station == ""
     assert "aviation_station" not in (tmp_path / "config.toml").read_text()
     assert back.desktop_notify and back.bell and back.animate and back.visitor
+    assert back.sats.panel and back.sats.tle_refresh_hours == 3
 
 
 async def test_pinned_airport_by_number_and_by_icao(tmp_path):
     rows, auto = await awc.nearby_stations(FakeHttp(), CLT.lat, CLT.lon)
-    _, cfg, _ = await wizard(tmp_path, "28202", "", "", "2", "n", "n", "n", "n")
+    _, cfg, _ = await wizard(tmp_path, "28202", "", "", "2", "n", "n", "n", "n", "", "")
     assert cfg.aviation_station == rows[1][0].icao
     assert (cfg.desktop_notify, cfg.bell, cfg.animate, cfg.visitor) == (False, False, False, False)
-    _, cfg, out = await wizard(tmp_path, "28202", "", "", "KZZZ", "9", "kjqf", "", "", "", "")
+    _, cfg, out = await wizard(tmp_path, "28202", "", "", "KZZZ", "9", "kjqf", "", "", "", "", "", "")
     assert cfg.aviation_station == "KJQF" and "KZZZ isn't in" in out and "Pick a number" in out
 
 
 async def test_coordinates_work_offline(tmp_path):
     offline = FakeHttp({"geocoding-api": FetchError("offline"), "stationinfo": FetchError("offline")})
-    code, cfg, out = await wizard(tmp_path, "35.2,-80.8", "c", "", "", "", "", http=offline)
+    code, cfg, out = await wizard(tmp_path, "35.2,-80.8", "c", "", "", "", "", "", "", http=offline)
     assert code == 0 and (cfg.location.lat, cfg.location.lon) == (35.2, -80.8)
     assert cfg.units == U.METRIC and cfg.aviation_station == "" and "Couldn't look up airports" in out
 
@@ -67,20 +68,29 @@ async def test_coordinates_work_offline(tmp_path):
 async def test_search_with_several_matches_and_no_match(tmp_path):
     names = [loc.label for loc in await geo.search(FakeHttp(), "Denver")]  # the fixture has several matches
     assert len(names) > 1
-    #                                 no match  search  pick  units airport 4 prefs
-    _, cfg, out = await wizard(tmp_path, "Q", "Denver", "2", "", "", "", "", "", "", http=FakeHttp())
+    #                                 no match  search  pick  units airport 4 prefs  2 sats
+    _, cfg, out = await wizard(tmp_path, "Q", "Denver", "2", "", "", "", "", "", "", "", "", http=FakeHttp())
     assert cfg.location.label == names[1] and "No place matches “Q”" in out and "  2. " in out
 
 
 async def test_rerun_keeps_everything(tmp_path):
     cfg = Config(path=tmp_path / "config.toml", location=CLT, units=U.METRIC, aviation_station="KJQF", bell=False)
-    code, cfg, _ = await wizard(tmp_path, *[""] * 7, cfg=cfg)
+    code, cfg, _ = await wizard(tmp_path, *[""] * 9, cfg=cfg)
     assert code == 0
     back = Config.load(tmp_path / "config.toml")
     assert back.location.same_place(CLT) and back.units == U.METRIC and back.aviation_station == "KJQF"
     assert back.bell is False and back.animate is True
-    _, cfg, _ = await wizard(tmp_path, "", "", "auto", "", "", "", "", cfg=back)
+    _, cfg, _ = await wizard(tmp_path, "", "", "auto", "", "", "", "", "", "", cfg=back)
     assert cfg.aviation_station == ""
+
+
+async def test_tle_interval_question(tmp_path):
+    #                                 ZIP     confirm units airport 4 prefs          panel  bad   too fast  ok
+    _, cfg, out = await wizard(tmp_path, "28202", "", "", "", "", "", "", "", "n", "soon", "1", "6h")
+    assert cfg.sats.panel is False and cfg.sats.tle_refresh_hours == 6
+    assert "Type a number of hours" in out and "Between 2 and 168 hours" in out
+    back = Config.load(tmp_path / "config.toml")
+    assert back.sats.tle_refresh_hours == 6 and back.sats.panel is False
 
 
 async def test_quitting_saves_nothing(tmp_path):

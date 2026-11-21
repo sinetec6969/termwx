@@ -1,0 +1,74 @@
+[
+ {
+  "sat_id": "XSKZ-5603-1870-9019-3066",
+  "norad_cat_id": 25544,
+  "norad_follow_id": null,
+  "name": "ISS",
+  "names": "ZARYA, RS0ISS, NA1SS",
+  "status": "in orbit"
+ },
+ {
+  "sat_id": "IRES-5964-9687-1982-0089",
+  "norad_cat_id": 27607,
+  "norad_follow_id": null,
+  "name": "SAUDISAT 1C",
+  "names": "SO-50",
+  "status": "in orbit"
+ },
+ {
+  "sat_id": "TSLM-4078-5089-9909-4945",
+  "norad_cat_id": 36799,
+  "norad_follow_id": null,
+  "name": "TISAT 1",
+  "names": "",
+  "status": "in orbit"
+ },
+ {
+  "sat_id": "EEIT-0315-8565-1765-1994",
+  "norad_cat_id": 40931,
+  "norad_follow_id": null,
+  "name": "LAPAN-A2",
+  "names": "ORARI, IO-86, YB0X",
+  "status": "in orbit"
+ },
+ {
+  "sat_id": "PMAW-9203-2442-8666-3249",
+  "norad_cat_id": 43017,
+  "norad_follow_id": null,
+  "name": "FOX-1B",
+  "names": "AO-91, RADFXSAT",
+  "status": "in orbit"
+ },
+ {
+  "sat_id": "LBQI-9987-6865-3928-8294",
+  "norad_cat_id": 43700,
+  "norad_follow_id": null,
+  "name": "Es'hail 2",
+  "names": "QO-100",
+  "status": "in orbit"
+ },
+ {
+  "sat_id": "KHIK-6754-7801-4022-8938",
+  "norad_cat_id": 43770,
+  "norad_follow_id": null,
+  "name": "FOX-1C",
+  "names": "AO-95Fox-1Cliff",
+  "status": "in orbit"
+ },
+ {
+  "sat_id": "FNPJ-5961-0820-4470-5491",
+  "norad_cat_id": 99914,
+  "norad_follow_id": 43775,
+  "name": "ExseedSat 1",
+  "names": "VO-96",
+  "status": "in orbit"
+ },
+ {
+  "sat_id": "FHBV-2936-6768-6010-3809",
+  "norad_cat_id": 98248,
+  "norad_follow_id": null,
+  "name": "JAMX01",
+  "names": "",
+  "status": "in orbit"
+ }
+]

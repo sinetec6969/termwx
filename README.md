@@ -4,7 +4,8 @@ Terminal weather and aviation situational awareness: live conditions with an
 animated ASCII sky, 24–36h hourly graph, 3-day forecast, NWS severe weather
 alerts, a NOAA space weather dashboard, an aviation console with METAR/TAF,
 PIREPs, SIGMETs, G-AIRMETs, CWAs, TFRs, winds aloft and the NWS forecast discussion,
-and a Part 107 drone go/no-go checklist. No API keys (NOTAMs are an opt-in extra).
+a Part 107 drone go/no-go checklist, and a gpredict-style tracker for FM repeater and APRS
+amateur satellites. No API keys (NOTAMs are an opt-in extra).
 
 ![termwx dashboard showing current conditions, the night sky, hourly graph, 3-day forecast, an alert banner, and the aviation, drone go/no-go and space weather panels](docs/screenshot.png)
 
@@ -75,6 +76,7 @@ termwx --no-anim                # static sky
 | `v` | aviation screen (METAR, TAF timeline, hazards, TFRs, NOTAMs & PIREPs, winds aloft, field tools) |
 | `d` | NWS Area Forecast Discussion, aviation section first |
 | `g` | drone go/no-go: Part 107 weather checks and preflight checklist |
+| `o` | satellites: FM repeater + APRS satellites, live az/el, Doppler, passes, sky plot |
 | `s` / `f` | save current location as favorite / cycle favorites |
 | `r` | refresh now |
 | `p` | pause animation |
@@ -113,6 +115,9 @@ flight window, `t` set the planned altitude, `x` clear the ticks, `r` refresh, `
   AIRMETs, PIREPs and TFRs nearby (plus NOTAMs when configured). Press `v` for the full picture.
 - **Drone go/no-go** — the overall verdict for the next flight window, the worst reasons,
   and how many preflight items are ticked. Press `g` for the checklist.
+- **Satellites** — FM repeater and APRS satellites overhead now (az/el and Doppler-corrected
+  downlink), then the next passes with AOS time, countdown and peak elevation, and how old
+  the TLEs are. Press `o` for the tracker.
 
 ## Aviation
 
@@ -238,6 +243,37 @@ can't go above 400 ft.
 (§99.7 blanket) restrictions and most other NOTAMs aren't in the TFR feed. The airspace and
 NOTAM items stay manual.
 
+## Satellites
+
+`o` opens a tracker for every active amateur **FM voice repeater** and **APRS digipeater**
+satellite, built along the lines of gpredict (its features reimplemented in Python with the
+[`sgp4`](https://pypi.org/project/sgp4/) library, not ported from its code):
+
+- **Which satellites:** the SatNOGS DB transmitter list: transmitters marked alive that are an
+  FM repeater with an uplink, or an AFSK APRS digipeater. Linear transponders, command
+  channels and geostationary satellites (QO-100) are left out, and SatNOGS names are used
+  (AO-91, PO-101, SO-50…).
+- **Left:** the list, with satellites in view first (live az/el), then by next AOS.
+- **Right, for the highlighted satellite:**
+  - live azimuth, elevation, range, range rate and sub-satellite point;
+  - every uplink and downlink with the Doppler-corrected **tx** (what to transmit) and
+    **rx** (where to listen) frequencies, live while it's up and at AOS otherwise, plus the
+    CTCSS tone;
+  - the next 24 hours of passes (AOS, LOS, duration, peak elevation, direction);
+  - an ASCII polar sky plot of the selected pass, with `[` `]` to step between passes.
+
+**TLEs** come from CelesTrak. They load when termwx starts, then every 3 hours by default:
+- **Change the interval:** `i` in the tracker, or `termwx setup`. The range is 2–168 h.
+- **Update now:** `U` or the **Update TLEs now** button.
+
+CelesTrak only publishes new elements about every 2 hours and blocks clients that keep
+re-downloading unchanged data. So if the saved TLEs are less than 2 hours old, startup uses
+them, and the automatic interval can't go below 2 h. A failed update keeps the saved TLEs and
+says so in the panel; termwx retries 15 minutes later.
+
+`e` sets the minimum elevation for a usable pass (default 10°). As in gpredict, AOS and LOS
+are still the horizon crossings; passes that peak lower are hidden.
+
 ## Refresh & offline
 
 | product | refresh |
@@ -252,6 +288,9 @@ NOTAM items stay manual.
 | Area Forecast Discussion | 20 min (re-downloaded only when a new one is issued) |
 | Winds aloft | 30 min |
 | Aviation station and runways | only when the location or chosen airport changes |
+| Satellite TLEs (CelesTrak) | at startup if 2 h old or more, then every 3 h (configurable, 2–168 h); `U` forces |
+| Satellite transmitter list (SatNOGS) | daily, or on a forced update |
+| Satellite passes | every 5 min, and when the location or minimum elevation changes |
 
 Every product is fetched and cached independently in `~/.cache/termwx`: a PIREP outage never
 takes down METARs, weather or space weather. If the network drops, the last data is shown and
@@ -295,6 +334,11 @@ max_kp = 5
 anticollision_lighting = false  # lights visible 3 SM: allows civil twilight
 night_qualified = false         # plus updated knowledge test/training: allows night
 
+[sats]                      # FM/APRS satellite tracker (o)
+panel = true                # show next passes on the dashboard
+tle_refresh_hours = 3       # reload TLEs this often (2–168); o → i to change, o → U to force
+min_elevation = 10          # hide passes peaking lower than this (degrees)
+
 [location]
 name = "Charlotte"
 lat = 35.22709
@@ -317,9 +361,12 @@ timezone = "America/New_York"
 | Temporary flight restrictions | [FAA TFR feeds](https://tfr.faa.gov/) (GeoServer outlines + XNOTAM detail) |
 | NOTAMs (opt-in, credentials required) | [FAA NOTAM Management Service](https://nms.aim.faa.gov/) |
 | Space weather | [NOAA SWPC](https://services.swpc.noaa.gov/) |
+| Satellite TLEs | [CelesTrak](https://celestrak.org/) GP data |
+| Satellite transmitters and names | [SatNOGS DB](https://db.satnogs.org/) (CC BY-SA 4.0) |
 | IP location | [ipinfo.io](https://ipinfo.io/) (fallback ipapi.co) |
 | Sky visitor signs | ZenQuotes, DummyJSON, Advice Slip, catfact.ninja, Dog API, Useless Facts, Wikipedia On This Day, Open Trivia DB, TheMealDB, NPR & BBC RSS, icanhazdadjoke, JokeAPI, Official Joke API, chucknorris.io, kanye.rest |
 
+The satellite tracker follows [gpredict](https://github.com/csete/gpredict)'s design.
 Inspired by [wttr.in](https://github.com/chubin/wttr.in), weathr, weather-tui and Stormy.
 
 ## Project status
@@ -392,6 +439,9 @@ Charlotte, Denver and Tampa, and the drone checklist for Charlotte, Cheyenne and
 | `aviation.py` | pure calculations: geometry, categories, density altitude, wind, trends |
 | `drone.py` | pure go/no-go evaluation: limits, checks, civil twilight |
 | `render_drone.py`, `screens_drone.py` | drone panel and checklist screen |
+| `api/sats.py` | SatNOGS transmitter filter, CelesTrak TLEs, refresh policy, saved copy |
+| `orbit.py`, `sat_models.py` | pure SGP4 look angles, Doppler and pass search; satellite dataclasses |
+| `render_sats.py`, `screens_sats.py` | satellite panel, tracker screen and polar plot |
 | `render.py`, `render_aviation.py` | Rich renderers shared by the TUI and `--once` |
 | `screens.py`, `screens_aviation.py` | general screens / aviation, discussion and prompt screens |
 | `app.py`, `once.py` | the Textual app and the non-interactive snapshot |

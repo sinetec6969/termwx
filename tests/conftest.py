@@ -33,6 +33,12 @@ def no_notam_credentials(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def isolated_cache(monkeypatch, tmp_path):
+    """Keep tests away from the developer's real ~/.cache/termwx (e.g. the saved satellite TLEs)."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg-cache"))
+
+
+@pytest.fixture(autouse=True)
 def pinned_aviation_clock(monkeypatch):
     """Ages, validity windows and expiry are computed against the fixtures' recording time."""
     monkeypatch.setattr(aviation, "utcnow", lambda: FIXTURE_NOW)
@@ -66,12 +72,22 @@ ROUTES = [
     ("api.weather.gov/products/types/AFD", "nws_afd_list.json"),
     ("api.weather.gov/products/", "nws_afd.json"),
     ("tfr.faa.gov/geoserver/TFR/ows", "faa_tfr_wfs.json"),
+    ("db.satnogs.org/api/transmitters", "satnogs_transmitters.json"),
+    ("db.satnogs.org/api/satellites", "satnogs_satellites.json"),
 ]
 TEXT_ROUTES = [
     ("aviationweather.gov/api/data/windtemp", "awc_windtemp_us.txt"),
     ("tfr.faa.gov/download/detail_6_9169.xml", "faa_tfr_detail_6_9169.xml"),
     ("tfr.faa.gov/download/detail_6_4348.xml", "faa_tfr_detail_6_4348.xml"),
 ]
+
+
+def celestrak(params: dict) -> str:
+    """CelesTrak gp.php: the trimmed amateur group, or one CATNR (unknown ones say so, as the real API does)."""
+    if params.get("GROUP") == "amateur":
+        return load_text("celestrak_amateur.tle")
+    path = FIXTURES / f"celestrak_catnr_{params.get('CATNR')}.tle"
+    return path.read_text() if path.exists() else "No GP data found"
 
 
 class FakeHttp:
@@ -102,6 +118,8 @@ class FakeHttp:
                 if isinstance(value, Exception):
                     raise value
                 return value
+        if "celestrak.org" in url:
+            return celestrak(params or {})
         raise FetchError(f"no fixture for {url}")
 
     async def get_text_cached(self, url, params=None, headers=None):
