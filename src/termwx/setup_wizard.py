@@ -2,8 +2,9 @@
 installer can run it under `curl | sh` with answers read from /dev/tty.
 
 Asks for the location (ZIP, city or lat,lon, or IP detection), units, the
-aviation airport (auto = nearest, or a pinned ICAO) and notification/animation
-preferences, then writes config.toml. Current settings are the defaults, so a
+aviation airport (auto = nearest, or a pinned ICAO), notification/animation
+preferences and the satellite tracker's TLE reload interval, then writes
+config.toml. Current settings are the defaults, so a
 re-run only changes what you touch. Nothing is saved if you quit part-way.
 """
 
@@ -18,7 +19,7 @@ from rich.console import Console
 from rich.markup import escape
 
 from . import units as U
-from .api import awc, geo
+from .api import awc, geo, sats as S
 from .api.http import FetchError, Http
 from .config import Config
 from .models import Location
@@ -145,6 +146,23 @@ async def _airport(p: _Prompter, http: Http, loc: Location, current: str, units:
         return st.icao
 
 
+def _tle_hours(p: _Prompter, current: float) -> float:
+    while True:
+        ans = p.line(f"Reload satellite TLEs every how many hours?  [{DIM}]2–168 · Enter = {current:g}[/]  ")
+        if not ans:
+            return current
+        try:
+            hours = float(ans.rstrip("hH "))
+        except ValueError:
+            p.console.print(f"[{DIM}]Type a number of hours, like 3.[/]")
+            continue
+        if not S.MIN_HOURS <= hours <= S.MAX_HOURS:
+            p.console.print(f"[{DIM}]Between {S.MIN_HOURS:g} and {S.MAX_HOURS:g} hours "
+                            f"(CelesTrak only updates about every 2 h).[/]")
+            continue
+        return hours
+
+
 async def run(cfg: Config, http: Http, ask: Ask = input, console: Console | None = None) -> int:
     """The interactive flow. Returns 0 when saved, 1 on EOF, 130 on Ctrl-C."""
     console = console or Console(highlight=False)
@@ -169,6 +187,12 @@ async def run(cfg: Config, http: Http, ask: Ask = input, console: Console | None
         bell = p.yes("Ring the terminal bell for new alerts?", cfg.bell)
         animate = p.yes("Animated sky?", cfg.animate)
         visitor = p.yes("Sky visitor (quotes, facts, jokes and headlines)?", cfg.visitor)
+
+        _heading(console, 5, "Satellites")
+        console.print(f"[{DIM}]FM repeater and APRS satellites (o in the app). TLEs load at startup, "
+                      f"then on this interval; o → U forces an update.[/]")
+        sat_panel = p.yes("Show the satellite pass panel on the dashboard?", cfg.sats.panel)
+        tle_hours = _tle_hours(p, cfg.sats.tle_refresh_hours)
     except KeyboardInterrupt:
         console.print("\nSetup cancelled — nothing was saved.")
         return 130
@@ -180,6 +204,7 @@ async def run(cfg: Config, http: Http, ask: Ask = input, console: Console | None
         cfg.location = loc
     cfg.units, cfg.aviation_station = units, station
     cfg.desktop_notify, cfg.bell, cfg.animate, cfg.visitor = notify, bell, animate, visitor
+    cfg.sats.panel, cfg.sats.tle_refresh_hours = sat_panel, tle_hours
     cfg.save()
     console.print()
     console.print(f"[green]✔[/] Saved to [bold]{escape(str(cfg.path))}[/]")

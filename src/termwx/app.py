@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import random
 import shutil
+from pathlib import Path
 
 from rich.markup import escape
 from rich.text import Text
@@ -17,17 +18,19 @@ from textual.widgets import Footer, Static
 
 from rich.console import Group
 
-from . import aviation as A, drone as D, render as R, render_aviation as RA, render_drone as RD, units as U, wmo
-from .api import awc, faa_notam, faa_tfr, geo, nws, openmeteo, quips, swpc
+from . import aviation as A, drone as D, orbit, render as R, render_aviation as RA, render_drone as RD, render_sats as RS, units as U, wmo
+from .api import awc, faa_notam, faa_tfr, geo, nws, openmeteo, quips, sats as S, swpc
 from .api.http import FetchError, Http
 from .aviation_models import AviationResult, StationChoice
 from .config import Config
 from .demo import demo_alerts, demo_tfr
 from .models import Alert, AlertsResult, ForecastDiscussion, Location, SpaceWeather, Weather
+from .sat_models import SatState
 from .scene import SceneState
 from .screens import AUTO, AlertsScreen, HelpScreen, LocationScreen, SpaceScreen
 from .screens_aviation import AviationScreen, DiscussionScreen
 from .screens_drone import DroneScreen
+from .screens_sats import SatScreen
 from .widgets import AlertBanner, DataPanel, ScenePanel
 
 WEATHER_EVERY = 600
@@ -40,6 +43,9 @@ HAZARDS_EVERY = 300  # SIGMET / G-AIRMET / CWA and PIREPs
 WINDS_EVERY = 1800  # FD winds aloft are issued four times a day
 AFD_EVERY = 1200
 AV_ERRORS = (FetchError, KeyError, TypeError, ValueError, IndexError)
+SATS_CHECK_EVERY = 60  # is a TLE update due? (the interval itself is config.sats.tle_refresh_hours)
+PASSES_EVERY = 300  # recompute the 24 h pass predictions
+SAT_ERRORS = (FetchError, KeyError, TypeError, ValueError, IndexError)
 VISITOR_MIN, VISITOR_MAX = 500, 900  # seconds between sky visitors, picked at random
 
 WIDE = 120
@@ -74,6 +80,7 @@ class TermWx(App):
         Binding("v", "aviation", "Aviation"),
         Binding("d", "discussion", "Discussion"),
         Binding("g", "drone", "Drone"),
+        Binding("o", "sats", "Satellites"),
         Binding("s", "favorite", "Save ★"),
         Binding("f", "next_favorite", "Next ★"),
         Binding("a", "autolocate", "Auto-locate", show=False),
@@ -91,6 +98,7 @@ class TermWx(App):
         location_query: str | None = None,
         demo_alert: bool = False,
         save_config: bool = True,
+        sat_cache: Path | None = None,
     ):
         super().__init__()
         self.config = config
@@ -114,6 +122,9 @@ class TermWx(App):
         self._runway_auto = True
         self.drone: D.GoNoGo | None = None
         self.drone_ticks: set[str] = set()  # manual preflight items, this session and location only
+        self.sat_cache = sat_cache or S.cache_path()
+        self.sats = SatState(min_el=config.sats.min_elevation, refresh_hours=config.sats.tle_refresh_hours)
+        self._sat_attempt = None  # when the last automatic TLE update started (UTC)
 
     # ── layout ───────────────────────────────────────────────────────────────
     def compose(self) -> ComposeResult:
@@ -132,6 +143,8 @@ class TermWx(App):
                     yield DataPanel(self._render_aviation, "finding aviation station…", "Aviation  v", id="aviation")
                     if self.config.drone.panel:
                         yield DataPanel(RD.drone_summary, "waiting for weather…", "Drone go/no-go  g", id="drone")
+                    if self.config.sats.panel:
+                        yield DataPanel(RS.sats_panel, "loading satellites…", "Satellites  o", id="sats")
                     yield DataPanel(R.space_panel, "fetching space weather…", "Space Weather", id="space")
         yield Footer()
 
@@ -147,7 +160,13 @@ class TermWx(App):
         self.set_interval(HAZARDS_EVERY, self._refresh_hazards)
         self.set_interval(WINDS_EVERY, lambda: self.load_winds())
         self.set_interval(AFD_EVERY, lambda: self.load_discussion())
+        self.set_interval(SATS_CHECK_EVERY, self._sats_due)
+        self.set_interval(PASSES_EVERY, lambda: self.recompute_passes())
         self._schedule_visitor()
+        cached = S.load_cache(self.sat_cache)
+        if cached:
+            self.sats.catalog = cached
+        self.load_sats(startup=True)
         self.startup()
 
     def on_resize(self, event) -> None:
@@ -194,6 +213,9 @@ class TermWx(App):
             for pid in ("current", "hourly", "forecast", "alerts"):
                 self.query_one(f"#{pid}", DataPanel).set_data(None)
             self._reset_aviation()
+            self.sats.passes, self.sats.computed_at = {}, None
+        self.sats.lat, self.sats.lon, self.sats.tz = loc.lat, loc.lon, loc.timezone
+        self.recompute_passes()
         self.update_topbar()
         self.load_weather()
         self.load_alerts()
@@ -488,6 +510,89 @@ class TermWx(App):
         self._drone_changed()
 
     # ── forecast discussion ──────────────────────────────────────────────────
+    # ── satellites ───────────────────────────────────────────────────────────
+    @work(exclusive=True, group="sats")
+    async def load_sats(self, force: bool = False, startup: bool = False) -> None:
+        """Fetch TLEs when forced or due; either way, then recompute passes."""
+        st = self.sats
+        now = S.utcnow()
+        if force or S.is_due(st.catalog, now, st.refresh_hours, startup=startup):
+            self._sat_attempt = now
+            st.updating = True
+            self._sats_changed()
+            try:
+                cat = await S.fetch_catalog(self.http, st.catalog if st.catalog.satellites else None, force=force)
+            except SAT_ERRORS as e:
+                st.catalog.stale = bool(st.catalog.satellites)
+                st.catalog.error = str(e) or e.__class__.__name__
+                if force:
+                    self.notify(f"TLE update failed: {st.catalog.error}", severity="warning")
+            else:
+                st.catalog = cat
+                await asyncio.to_thread(S.save_cache, cat, self.sat_cache)
+                if force:
+                    self.notify(f"TLEs updated · {len(cat.satellites)} satellites", timeout=3)
+            finally:
+                st.updating = False
+        self.recompute_passes()
+
+    def _sats_due(self) -> None:
+        st, now = self.sats, S.utcnow()
+        if st.updating or not S.is_due(st.catalog, now, st.refresh_hours):
+            return
+        if self._sat_attempt and now - self._sat_attempt < S.RETRY_AFTER:
+            return  # the last try failed recently; don't hammer CelesTrak
+        self.load_sats()
+
+    @work(exclusive=True, group="sat-passes")
+    async def recompute_passes(self) -> None:
+        st, loc = self.sats, self.location
+        if loc is None or not st.catalog.satellites:
+            self._sats_changed()
+            return
+        sats, min_el, now = list(st.catalog.satellites), st.min_el, S.utcnow()
+
+        def run() -> dict:
+            obs = orbit.Observer(loc.lat, loc.lon)
+            out = {}
+            for sat in sats:
+                try:
+                    out[sat.norad] = orbit.find_passes(sat, obs, now, 24, min_el)
+                except (ValueError, ZeroDivisionError):  # malformed elements
+                    out[sat.norad] = []
+            return out
+
+        passes = await asyncio.to_thread(run)
+        if self.location is not loc:
+            return  # moved while computing; set_location started a fresh run
+        st.passes, st.computed_at = passes, now
+        self._sats_changed()
+
+    def _sats_changed(self) -> None:
+        try:
+            self.query_one("#sats", DataPanel).set_data(self.sats)
+        except NoMatches:  # panel turned off in config, or shutting down
+            pass
+        if isinstance(self.screen, SatScreen):
+            self.screen.redraw()
+
+    def set_tle_interval(self, hours: float) -> None:
+        hours = S.clamp_hours(hours)
+        self.config.sats.tle_refresh_hours = self.sats.refresh_hours = hours
+        self._save()
+        nxt = self.sats.next_update()
+        when = f", next at {R.hhmm(RD._local(max(nxt, S.utcnow()), self.sats.tz))}" if nxt else ""
+        self.notify(f"TLEs will reload every {hours:g} h{when}", timeout=4)
+        self._sats_changed()
+        self._sats_due()
+
+    def set_sat_min_elevation(self, degrees: float) -> None:
+        self.config.sats.min_elevation = degrees
+        self.config.sats.clamped()
+        self.sats.min_el = self.config.sats.min_elevation
+        self._save()
+        self.recompute_passes()
+
     @work(exclusive=True, group="afd")
     async def load_discussion(self) -> None:
         loc = self.location
@@ -522,6 +627,7 @@ class TermWx(App):
         self.query_one("#aviation", DataPanel).redraw()
         self.query_one("#alerts", DataPanel).redraw()
         self._drone_changed()  # twilight and the window move with the clock
+        self._sats_changed()  # countdowns and live elevations
 
     # ── alerts ───────────────────────────────────────────────────────────────
     def refresh_alerts(self) -> None:
@@ -662,6 +768,9 @@ class TermWx(App):
 
     def action_drone(self) -> None:
         self.push_screen(DroneScreen())
+
+    def action_sats(self) -> None:
+        self.push_screen(SatScreen())
 
     def action_alerts(self) -> None:
         if not self.all_alerts:

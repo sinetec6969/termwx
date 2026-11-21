@@ -17,6 +17,7 @@ CLT = Location("Charlotte", 35.2271, -80.8431, "North Carolina", "United States"
 
 def make_app(tmp_path, http=None, **kw) -> TermWx:
     cfg = Config(path=tmp_path / "config.toml", location=CLT, desktop_notify=False, bell=False, animate=False)
+    kw.setdefault("sat_cache", tmp_path / "sats.json")
     return TermWx(cfg, http=http or FakeHttp(), **kw)
 
 

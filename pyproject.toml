@@ -5,12 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "termwx"
 version = "0.3.0"
-description = "Terminal weather and aviation console: conditions, forecast, NWS alerts, space weather, METAR/TAF, PIREPs and advisories"
+description = "Terminal weather and aviation console: conditions, forecast, NWS alerts, space weather, METAR/TAF, PIREPs, advisories and an amateur satellite tracker"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "textual>=8.0",
     "httpx>=0.27",
+    "sgp4>=2.23",
 ]
 
 [project.optional-dependencies]

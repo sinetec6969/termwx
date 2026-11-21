@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from .api.sats import MAX_HOURS, MIN_HOURS
 from .drone import DroneLimits
 from .models import Location
 from .units import IMPERIAL, METRIC
@@ -16,6 +18,34 @@ from .units import IMPERIAL, METRIC
 def default_path() -> Path:
     base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
     return Path(base) / "termwx" / "config.toml"
+
+
+@dataclass
+class SatSettings:
+    """The [sats] table: the FM/APRS satellite tracker."""
+
+    panel: bool = True
+    tle_refresh_hours: float = 3.0
+    min_elevation: float = 10.0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> SatSettings:
+        out = cls()
+        if isinstance(d.get("panel"), bool):
+            out.panel = d["panel"]
+        for key in ("tle_refresh_hours", "min_elevation"):
+            v = d.get(key)
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
+                setattr(out, key, float(v))
+        return out.clamped()
+
+    def clamped(self) -> SatSettings:
+        self.tle_refresh_hours = max(MIN_HOURS, min(MAX_HOURS, self.tle_refresh_hours))
+        self.min_elevation = max(0.0, min(80.0, self.min_elevation))
+        return self
 
 
 @dataclass
@@ -29,6 +59,7 @@ class Config:
     visitor: bool = True
     aviation_station: str = ""  # explicit ICAO override; empty = nearest METAR station
     drone: DroneLimits = field(default_factory=DroneLimits)
+    sats: SatSettings = field(default_factory=SatSettings)
     path: Path = field(default_factory=default_path)
 
     @classmethod
@@ -48,6 +79,8 @@ class Config:
             cfg.aviation_station = data["aviation_station"].strip().upper()
         if isinstance(data.get("drone"), dict):
             cfg.drone = DroneLimits.from_dict(data["drone"])
+        if isinstance(data.get("sats"), dict):
+            cfg.sats = SatSettings.from_dict(data["sats"])
         try:
             if "location" in data:
                 cfg.location = Location.from_dict(data["location"])
@@ -69,6 +102,7 @@ class Config:
             lines.append(f"aviation_station = {_q(self.aviation_station)}")
         lines.append("")
         lines += ["[drone]", *(f"{k} = {_v(v)}" for k, v in self.drone.to_dict().items()), ""]
+        lines += ["[sats]", *(f"{k} = {_v(v)}" for k, v in self.sats.to_dict().items()), ""]
         if self.location:
             lines += ["[location]", *_table(self.location), ""]
         for fav in self.favorites:
