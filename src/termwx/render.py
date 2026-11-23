@@ -9,8 +9,8 @@ from rich.console import Group, RenderableType
 from rich.table import Table
 from rich.text import Text
 
-from . import moon, units as U, wmo
-from .models import Alert, AlertsResult, KpPoint, SpaceWeather, SwpcMessage, Weather
+from . import hf as HF, moon, units as U, wmo
+from .models import Alert, AlertsResult, HfConditions, KpPoint, SpaceWeather, SwpcMessage, Weather
 
 DIM = "#8b949e"
 LABEL = "#7d8590"
@@ -503,6 +503,9 @@ def space_panel(sw: SpaceWeather | None, width: int = 40) -> RenderableType:
         au.append(" --", style=DIM)
     out.append(au)
 
+    if sw.hf is not None:
+        out.extend(hf_lines(sw.hf))
+
     if sw.outlook:
         tbl = Table.grid(padding=(0, 1))
         tbl.add_column(style=LABEL)
@@ -524,6 +527,54 @@ def space_panel(sw: SpaceWeather | None, width: int = 40) -> RenderableType:
     if sw.stale:
         out.append(Text("⚠ offline – cached", style="#ff9f43"))
     return Group(*out)
+
+
+def muf_color(muf: float) -> str:
+    return "#3fb950" if muf >= 21 else "#9be15d" if muf >= 14 else "#d29922" if muf >= 7 else "#f0883e"
+
+
+def hf_lines(hf: HfConditions) -> list[Text]:
+    """MUF / LUF at the user's location plus which amateur bands look open."""
+    t = Text()
+    t.append("HF    ", style=LABEL)
+    t.append("MUF ", style=LABEL)
+    if hf.muf is not None:
+        t.append(f"{hf.muf:.1f}", style=f"bold {muf_color(hf.muf)}")
+    else:
+        t.append("--", style=DIM)
+    t.append("  LUF ", style=LABEL)
+    if hf.luf is not None:
+        lc = "#f85149" if hf.luf_source else "#e6edf3"
+        t.append(f"{hf.luf:.1f}", style=f"bold {lc}")
+    else:
+        t.append("--", style=DIM)
+    t.append(" MHz", style=DIM)
+    if hf.luf_source:
+        t.append(f"  {hf.luf_source}", style="bold #f85149")
+    out = [t]
+
+    bands = Text("      ", overflow="ellipsis", no_wrap=True)
+    for label, is_open in HF.open_bands(hf):
+        style = "bold #3fb950" if is_open else "#c9d1d9" if is_open is None else "#484f58"
+        bands.append(label, style=style)
+        bands.append(" ")
+    out.append(bands)
+
+    src = Text("      ", style=DIM, overflow="ellipsis", no_wrap=True)
+    if hf.muf is not None:
+        if hf.fof2 is not None:
+            src.append(f"foF2 {hf.fof2:.1f} · ")
+        src.append(f"{hf.station} {hf.station_km:,.0f} km")
+        if hf.station_count > 1:
+            src.append(f" +{hf.station_count - 1}")
+        if hf.station_time:
+            src.append(f" · {hhmm(hf.station_time.astimezone())}")
+    elif hf.nearest_station_km is not None:
+        src.append(f"no ionosonde in range (nearest {hf.nearest_station_km:,.0f} km)")
+    else:
+        src.append("no recent ionosonde data")
+    out.append(src)
+    return out
 
 
 def message_color(m: SwpcMessage) -> str:

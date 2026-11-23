@@ -6,7 +6,8 @@ import asyncio
 import re
 from datetime import date, datetime, timedelta, timezone
 
-from ..models import KpPoint, ScaleOutlook, SpaceWeather, SwpcMessage
+from .. import hf as HF
+from ..models import HfConditions, KpPoint, ScaleOutlook, SpaceWeather, SwpcMessage
 from .http import FetchError, Http
 
 BASE = "https://services.swpc.noaa.gov"
@@ -21,6 +22,9 @@ URLS = {
     "alerts": f"{BASE}/products/alerts.json",
     "aurora": f"{BASE}/json/ovation_aurora_latest.json",
 }
+DRAP_URL = f"{BASE}/text/drap_global_frequencies.txt"
+# GIRO ionosonde soundings, republished by KC2G (not SWPC, so not counted toward "unavailable").
+IONOSONDE_URL = "https://prop.kc2g.com/api/stations.json"
 
 
 def _utc(s: str | None) -> datetime | None:
@@ -182,9 +186,16 @@ def aurora_lookup(data: dict, lat: float, lon: float) -> tuple[int | None, int |
     return overhead, nearby, _utc(data.get("Forecast Time"))
 
 
-async def fetch_space(http: Http, lat: float, lon: float) -> SpaceWeather:
+async def fetch_space(http: Http, lat: float, lon: float, now: datetime | None = None) -> SpaceWeather:
     names = list(URLS)
-    results = await asyncio.gather(*(http.get_json(URLS[n]) for n in names), return_exceptions=True)
+    results = await asyncio.gather(
+        *(http.get_json(URLS[n]) for n in names),
+        http.get_text_cached(DRAP_URL),
+        http.get_json(IONOSONDE_URL),
+        return_exceptions=True,
+    )
+    drap, iono = results[-2:]
+    results = results[:-2]
     sw = SpaceWeather()
     parsers = {
         "scales": parse_scales,
@@ -221,7 +232,30 @@ async def fetch_space(http: Http, lat: float, lon: float) -> SpaceWeather:
             pass
     if len(sw.errors) == len(names):
         raise FetchError("space weather unavailable")
+    sw.hf = _hf(sw, drap, iono, lat, lon, now or datetime.now(timezone.utc))
     return sw
+
+
+def _hf(sw: SpaceWeather, drap, iono, lat: float, lon: float, now: datetime) -> HfConditions:
+    """MUF from nearby ionosondes, LUF from sun angle + D-RAP; either source may be missing."""
+    hf = HfConditions()
+    for name, res, apply in (
+        ("drap", drap, lambda text: HF.drap_lookup(text, lat, lon, hf)),
+        ("ionosonde", iono, lambda data: HF.ionosonde_muf(data or [], lat, lon, hf, now)),
+    ):
+        if isinstance(res, BaseException):
+            if not isinstance(res, FetchError):
+                raise res
+            sw.errors.append(f"{name}: {res}")
+            continue
+        data, stale = res
+        sw.stale = sw.stale or stale
+        try:
+            apply(data)
+        except (KeyError, TypeError, ValueError, IndexError, AttributeError) as e:
+            sw.errors.append(f"{name}: unexpected format ({e})")
+    HF.finish(hf, lat, lon, sw.f107, now)
+    return hf
 
 
 def recent_major_messages(sw: SpaceWeather, min_level: int = 3, hours: int = 24) -> list[SwpcMessage]:

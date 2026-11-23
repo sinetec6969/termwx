@@ -120,6 +120,11 @@ everything. ok fine, specifically:
 - **Space Weather** — NOAA G/S/R scales, planetary Kp (observed + 3-day forecast), real-time
   solar wind speed/density, IMF Bt/Bz, GOES X-ray flare class, F10.7, OVATION aurora probability
   overhead and on your horizon, 3-day storm/blackout probabilities, latest SWPC bulletin.
+  plus HF propagation for where you actually are: **MUF(3000)** and foF2 blended from the nearest
+  live ionosondes (within 2000 km, last 90 min), an estimated **LUF** from sun angle + solar flux,
+  bumped up by NOAA D-RAP during flares (SWF) or polar cap absorption (PCA), and which ham bands
+  sit between the two. the LUF is a ballpark — the real one depends on your power, antenna and
+  noise floor, which termwx cannot see. (it can't see me either. i've been very still.)
   SWPC warnings at G3/S3/R3 or higher from the last 24h also show up in the alert banner.
   the NWS Alerts panel also shows when the local Area Forecast Discussion was issued.
 - **Aviation** — four-line summary of the nearest aviation station: identifier, flight
@@ -271,6 +276,12 @@ ported from its code — gpredict is GPL and i am tired, not reckless):
   command channels and geostationary satellites (QO-100, which never "passes", it just sits
   there, judging you) are left out, and SatNOGS names are used (AO-91, PO-101, SO-50…), so
   you don't have to know that "OBJECT T" is VO-96. now you know. you're welcome.
+  TLEs come from CelesTrak, or from SatNOGS' Space-Track copy for birds CelesTrak doesn't
+  carry yet (the new six-digit, Alpha-5 catalog numbers, like SO-131's `A1101`).
+- **Only the ones you care about:** set `track` under `[sats]` to a list of names, OSCAR
+  numbers or NORAD numbers and everything else disappears. a satellite tracked by one of its
+  other SatNOGS aliases shows under that name (`"CAS-3H"` rather than `LILACSAT 2`), and
+  anything that doesn't match gets a warning so you know your typo is a typo.
 - **Left:** the list, satellites in view first (live az/el), then sorted by next AOS.
 - **Right, for the highlighted satellite:**
   - live azimuth, elevation, range, range rate and sub-satellite point;
@@ -361,6 +372,7 @@ night_qualified = false         # plus updated knowledge test/training: allows n
 panel = true                # show next passes on the dashboard
 tle_refresh_hours = 3       # reload TLEs this often (2–168); o → i to change, o → U to force
 min_elevation = 10          # hide passes peaking lower than this (degrees)
+track = ["ISS", "SO-50"]    # only these (names, OSCAR or NORAD numbers); leave out for all
 
 [location]
 name = "Charlotte"
@@ -385,7 +397,8 @@ all free, all wonderful, all of them deserve a nap more than i do:
 | Aviation (METAR, TAF, PIREP, SIGMET, G-AIRMET, AIRMET, CWA, winds aloft, stations, runways) | [Aviation Weather Center Data API](https://aviationweather.gov/data/api/) |
 | Temporary flight restrictions | [FAA TFR feeds](https://tfr.faa.gov/) (GeoServer outlines + XNOTAM detail) |
 | NOTAMs (opt-in, credentials required) | [FAA NOTAM Management Service](https://nms.aim.faa.gov/) |
-| Space weather | [NOAA SWPC](https://services.swpc.noaa.gov/) |
+| Space weather, D-region absorption (D-RAP) | [NOAA SWPC](https://services.swpc.noaa.gov/) |
+| Ionosonde MUF / foF2 | [GIRO](https://giro.uml.edu/) soundings via [KC2G](https://prop.kc2g.com/) |
 | Satellite TLEs | [CelesTrak](https://celestrak.org/) GP data |
 | Satellite transmitters and names | [SatNOGS DB](https://db.satnogs.org/) (CC BY-SA 4.0) |
 | IP location | [ipinfo.io](https://ipinfo.io/) (fallback ipapi.co) |
@@ -467,6 +480,7 @@ things that are not perfect, listed by someone who is also not perfect:
 | `api/openmeteo.py`, `api/geo.py` | forecast, air quality, geocoding |
 | `api/nws.py` | alerts, forecast office lookup, Area Forecast Discussion |
 | `api/swpc.py` | space weather |
+| `hf.py` | pure HF propagation: ionosonde MUF blending, D-RAP lookup, LUF estimate, open bands |
 | `api/awc.py` | all Aviation Weather Center products, normalized at the boundary |
 | `api/faa_tfr.py` | FAA TFR outlines and details (no key) |
 | `api/faa_notam.py` | opt-in FAA NMS NOTAM client (credentials from the environment) |
@@ -475,7 +489,7 @@ things that are not perfect, listed by someone who is also not perfect:
 | `aviation.py` | pure calculations: geometry, categories, density altitude, wind, trends |
 | `drone.py` | pure go/no-go evaluation: limits, checks, civil twilight |
 | `render_drone.py`, `screens_drone.py` | drone panel and checklist screen |
-| `api/sats.py` | SatNOGS transmitter filter, CelesTrak TLEs, refresh policy, saved copy |
+| `api/sats.py` | SatNOGS transmitter filter, CelesTrak + SatNOGS TLEs, refresh policy, saved copy, track list |
 | `orbit.py`, `sat_models.py` | pure SGP4 look angles, Doppler and pass search; satellite dataclasses |
 | `render_sats.py`, `screens_sats.py` | satellite panel, tracker screen and polar plot |
 | `render.py`, `render_aviation.py` | Rich renderers shared by the TUI and `--once` |

@@ -40,6 +40,8 @@ class Satellite:
     tle2: str
     transmitters: list[Transmitter] = field(default_factory=list)
     alias: str = ""  # SatNOGS name, OSCAR number preferred (AO-91, PO-101)
+    sat_id: str = ""  # SatNOGS satellite id (for its TLE fallback)
+    names: list[str] = field(default_factory=list)  # every SatNOGS name and alias (CAS-3H, XW-2H, …)
 
     @property
     def short_name(self) -> str:
@@ -71,12 +73,13 @@ class Satellite:
 
     def to_dict(self) -> dict:
         return {"norad": self.norad, "name": self.name, "alias": self.alias, "tle1": self.tle1, "tle2": self.tle2,
-                "transmitters": [t.to_dict() for t in self.transmitters]}
+                "transmitters": [t.to_dict() for t in self.transmitters], "sat_id": self.sat_id, "names": self.names}
 
     @classmethod
     def from_dict(cls, d: dict) -> Satellite:
         return cls(int(d["norad"]), d["name"], d["tle1"], d["tle2"],
-                   [Transmitter.from_dict(t) for t in d.get("transmitters", [])], d.get("alias", ""))
+                   [Transmitter.from_dict(t) for t in d.get("transmitters", [])], d.get("alias", ""),
+                   d.get("sat_id", ""), list(d.get("names") or []))
 
 
 @dataclass

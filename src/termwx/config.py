@@ -27,6 +27,8 @@ class SatSettings:
     panel: bool = True
     tle_refresh_hours: float = 3.0
     min_elevation: float = 10.0
+    # only these satellites (names, OSCAR numbers or NORAD numbers); empty = every FM/APRS satellite
+    track: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -40,6 +42,10 @@ class SatSettings:
             v = d.get(key)
             if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
                 setattr(out, key, float(v))
+        track = d.get("track")
+        if isinstance(track, list):
+            items = (str(t).strip() for t in track if isinstance(t, (str, int)) and not isinstance(t, bool))
+            out.track = [t for t in items if t]
         return out.clamped()
 
     def clamped(self) -> SatSettings:
@@ -134,6 +140,10 @@ def _b(v: bool) -> str:
 
 
 def _v(v) -> str:
+    if isinstance(v, list):
+        return "[" + ", ".join(_v(x) for x in v) + "]"
+    if isinstance(v, str):
+        return _q(v)
     return _b(v) if isinstance(v, bool) else f"{v:g}" if isinstance(v, float) else str(v)
 
 

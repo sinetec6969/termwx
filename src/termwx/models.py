@@ -213,6 +213,24 @@ class SwpcMessage:
 
 
 @dataclass
+class HfConditions:
+    """HF propagation at the user's location (see termwx.hf)."""
+
+    muf: float | None = None  # MUF(3000)F2, MHz
+    fof2: float | None = None  # F2 critical frequency (NVIS ceiling), MHz
+    station: str = ""  # nearest ionosonde used
+    station_km: float | None = None
+    station_time: datetime | None = None
+    station_count: int = 0
+    nearest_station_km: float | None = None  # nearest recent ionosonde, even if out of range
+    luf: float | None = None  # estimated, MHz
+    luf_source: str = ""  # "" (quiet-day model), "SWF", "PCA" or "D-RAP" when absorption events dominate
+    haf: float | None = None  # D-RAP highest frequency affected by 1 dB absorption, MHz
+    swf: bool = False
+    pca: bool = False
+
+
+@dataclass
 class SpaceWeather:
     g_now: int = 0
     s_now: int = 0
@@ -233,6 +251,7 @@ class SpaceWeather:
     aurora_overhead: int | None = None
     aurora_nearby: int | None = None
     aurora_time: datetime | None = None
+    hf: HfConditions | None = None
     errors: list[str] = field(default_factory=list)
     fetched_at: datetime = field(default_factory=datetime.now)
     stale: bool = False

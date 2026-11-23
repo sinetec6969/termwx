@@ -7,11 +7,11 @@ import pytest
 from rich.console import Console
 
 from conftest import FakeHttp, load
-from termwx import moon, render as R, units as U, wmo
+from termwx import hf as HF, moon, render as R, units as U, wmo
 from termwx.api import geo, nws, openmeteo, swpc
 from termwx.api.http import FetchError, Http
 from termwx.config import Config
-from termwx.models import Location, SpaceWeather, SwpcMessage
+from termwx.models import HfConditions, Location, SpaceWeather, SwpcMessage
 from termwx.scene import SceneState, render_scene
 
 CLT = Location("Charlotte", 35.2271, -80.8431, "North Carolina", "United States", "US", "America/New_York")
@@ -155,6 +155,94 @@ def test_aurora_lookup():
     # southern hemisphere looks toward the south pole, not north
     overhead, nearby, _ = swpc.aurora_lookup({"coordinates": [[0, -60, 7], [0, -64, 30], [0, -56, 90]]}, -60, 0)
     assert (overhead, nearby) == (7, 30)
+
+
+# ── HF propagation (MUF / LUF) ───────────────────────────────────────────────
+# kc2g_stations.json and drap_global_frequencies.txt were recorded at this time.
+HF_NOW = datetime(2026, 11, 23, 18, 53, tzinfo=timezone.utc)
+
+
+async def test_fetch_space_hf_from_fixtures():
+    sw = await swpc.fetch_space(FakeHttp(), CLT.lat, CLT.lon, now=HF_NOW)
+    assert sw.errors == []
+    hf = sw.hf
+    # Millstone Hill (MA) is the only fresh, confident sounding within range of Charlotte.
+    assert hf.station == "Millstone Hill" and hf.station_count == 1
+    assert 1100 < hf.station_km < 1200
+    assert hf.muf == pytest.approx(28.84) and hf.fof2 == pytest.approx(7.975)
+    assert hf.haf == 0.0 and not hf.swf and not hf.pca
+    # early afternoon in late November: a daytime absorption LUF, not the night floor
+    assert 2.5 < hf.luf < 4.5 and hf.luf_source == ""
+
+
+async def test_fetch_space_hf_sources_fail_independently():
+    sw = await swpc.fetch_space(
+        FakeHttp({"kc2g.com": FetchError("down"), "drap_global": FetchError("down")}), CLT.lat, CLT.lon, now=HF_NOW
+    )
+    assert sw.kp and sw.hf.muf is None and sw.hf.luf is not None
+    assert any(e.startswith("ionosonde") for e in sw.errors) and any(e.startswith("drap") for e in sw.errors)
+
+
+def test_ionosonde_filters_stale_unconfident_and_distant():
+    def row(code, lat, lon, muf, cs=90, minutes=10):
+        t = (HF_NOW - timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%S")
+        return {"station": {"name": f"{code}, XX", "code": code, "latitude": str(lat), "longitude": str(lon)},
+                "mufd": muf, "fof2": muf / 3, "cs": cs, "time": t}
+
+    stations = [
+        row("NEAR", 0, 1, 20.0),
+        row("FAR", 0, 5, 10.0),  # ~550 km: blended in, but weighted far less
+        row("OLD", 0, 0.5, 99.0, minutes=180),
+        row("LOWCS", 0, 0.5, 99.0, cs=0),
+        row("MANUAL", 0, 359, 20.0, cs=-1),  # 0–360 longitudes; -1 = manually scaled, kept
+        row("AWAY", 40, 0, 99.0),  # > 2000 km
+    ]
+    hf = HfConditions()
+    HF.ionosonde_muf(stations, 0, 0, hf, HF_NOW)
+    assert hf.station_count == 3 and hf.station in ("NEAR", "MANUAL")
+    assert 19 < hf.muf < 20
+    hf = HfConditions()
+    HF.ionosonde_muf([row("AWAY", 40, 0, 9.0)], 0, 0, hf, HF_NOW)
+    assert hf.muf is None and 4400 < hf.nearest_station_km < 4500
+
+
+def test_drap_lookup_and_flare_luf():
+    text = (
+        "# X-RAY Message : X-ray Flux exceeds M5\n"
+        "# Proton Message : Normal Proton Background\n"
+        "      -178  -82   2\n"
+        "------------------\n"
+        " 37 |  0.0 12.0  1.0\n"
+        " 35 |  0.0 14.5  1.0\n"
+    )
+    hf = HfConditions()
+    HF.drap_lookup(text, CLT.lat, CLT.lon, hf)
+    assert hf.haf == 14.5 and hf.swf and not hf.pca
+    HF.finish(hf, CLT.lat, CLT.lon, 150, HF_NOW)
+    assert hf.luf == 14.5 and hf.luf_source == "SWF"
+    # longitude wraps: 179° is nearest to -178°
+    hf = HfConditions()
+    HF.drap_lookup(text, 36.4, 179, hf)
+    assert hf.haf == 0.0
+
+
+def test_quiet_luf_day_night_and_solar_activity():
+    assert HF.quiet_luf(-20, 150) == HF.LUF_NIGHT
+    assert HF.quiet_luf(80, 70) < HF.quiet_luf(80, 200) < 6.5
+    assert HF.quiet_luf(30, 150) < HF.quiet_luf(70, 150)
+    assert HF.sunspots_from_f107(63.7) == pytest.approx(0, abs=0.01)
+    assert 90 < HF.sunspots_from_f107(150) < 110
+
+
+def test_open_bands_and_panel():
+    hf = HfConditions(muf=15.0, luf=4.0, fof2=5.0, station="Somewhere", station_km=300, station_count=1)
+    bands = dict(HF.open_bands(hf))
+    assert bands["80"] is False and bands["40"] and bands["20"] and bands["17"] is False
+    assert dict(HF.open_bands(HfConditions(luf=4.0)))["20"] is None
+    console = Console(width=50, record=True, color_system=None)
+    console.print(R.space_panel(SpaceWeather(hf=hf), 50))
+    out = console.export_text()
+    assert "MUF 15.0" in out and "LUF 4.0" in out and "foF2 5.0 · Somewhere 300 km" in out
 
 
 # ── geo ──────────────────────────────────────────────────────────────────────

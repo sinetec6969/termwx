@@ -333,7 +333,7 @@ HELP = """\
 [b]q[/]  quit
 
 [dim]Data: Open-Meteo (forecast, AQI, geocoding) · NWS api.weather.gov (alerts, AFD)
-NOAA SWPC (space weather) · aviationweather.gov (aviation) · ipinfo.io (auto-locate)
+NOAA SWPC (space weather, D-RAP) · GIRO via KC2G (ionosondes) · aviationweather.gov (aviation) · ipinfo.io (auto-locate)
 CelesTrak (TLEs) · SatNOGS DB (satellite transmitters)
 
 Refresh: weather 10m · alerts 2m · space 5m · METAR 5m · TAF 10m

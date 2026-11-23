@@ -25,7 +25,7 @@ from .aviation_models import AviationResult, StationChoice
 from .config import Config
 from .demo import demo_alerts, demo_tfr
 from .models import Alert, AlertsResult, ForecastDiscussion, Location, SpaceWeather, Weather
-from .sat_models import SatState
+from .sat_models import Catalog, SatState
 from .scene import SceneState
 from .screens import AUTO, AlertsScreen, HelpScreen, LocationScreen, SpaceScreen
 from .screens_aviation import AviationScreen, DiscussionScreen
@@ -125,6 +125,8 @@ class TermWx(App):
         self.sat_cache = sat_cache or S.cache_path()
         self.sats = SatState(min_el=config.sats.min_elevation, refresh_hours=config.sats.tle_refresh_hours)
         self._sat_attempt = None  # when the last automatic TLE update started (UTC)
+        self._sat_all = Catalog()  # every FM/APRS satellite; self.sats.catalog is narrowed to [sats] track
+        self._sat_missing: list[str] = []
 
     # ── layout ───────────────────────────────────────────────────────────────
     def compose(self) -> ComposeResult:
@@ -165,7 +167,7 @@ class TermWx(App):
         self._schedule_visitor()
         cached = S.load_cache(self.sat_cache)
         if cached:
-            self.sats.catalog = cached
+            self._set_catalog(cached)
         self.load_sats(startup=True)
         self.startup()
 
@@ -521,20 +523,29 @@ class TermWx(App):
             st.updating = True
             self._sats_changed()
             try:
-                cat = await S.fetch_catalog(self.http, st.catalog if st.catalog.satellites else None, force=force)
+                cat = await S.fetch_catalog(self.http, self._sat_all if self._sat_all.satellites else None, force=force)
             except SAT_ERRORS as e:
                 st.catalog.stale = bool(st.catalog.satellites)
                 st.catalog.error = str(e) or e.__class__.__name__
                 if force:
                     self.notify(f"TLE update failed: {st.catalog.error}", severity="warning")
             else:
-                st.catalog = cat
+                self._set_catalog(cat)
                 await asyncio.to_thread(S.save_cache, cat, self.sat_cache)
                 if force:
-                    self.notify(f"TLEs updated · {len(cat.satellites)} satellites", timeout=3)
+                    self.notify(f"TLEs updated · {len(st.catalog.satellites)} satellites", timeout=3)
             finally:
                 st.updating = False
         self.recompute_passes()
+
+    def _set_catalog(self, cat: Catalog) -> None:
+        track = self.config.sats.track
+        self._sat_all = cat
+        self.sats.catalog = S.tracked(cat, track)
+        missing = S.not_found(cat, track)
+        if missing and missing != self._sat_missing:
+            self.notify(f"Not in the FM/APRS satellite list: {', '.join(missing)}", severity="warning", timeout=8)
+        self._sat_missing = missing
 
     def _sats_due(self) -> None:
         st, now = self.sats, S.utcnow()

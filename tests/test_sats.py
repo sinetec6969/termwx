@@ -31,11 +31,11 @@ def test_select_keeps_fm_repeaters_and_aprs_digipeaters():
     # QO-100 transponders, a DTMF command channel, a temporary ID with no real NORAD,
     # an AFSK downlink with no uplink and a dead repeater are all left out
     assert not {43700, 36799, 98248, 99914, 43770, 7530} & set(wanted)
-    alias, txs = wanted[25544]
-    assert alias == "ISS" and {t.kind for t in txs} == {FM, APRS}
-    assert wanted[43775][0] == "VO-96"  # SatNOGS temp ID 99914 followed to its NORAD number
-    assert wanted[43017][0] == "AO-91"  # OSCAR number preferred over FOX-1B
-    so50 = wanted[27607][1][0]
+    iss = wanted[25544]
+    assert iss.alias == "ISS" and {t.kind for t in iss.transmitters} == {FM, APRS}
+    assert wanted[43775].alias == "VO-96"  # SatNOGS temp ID 99914 followed to its NORAD number
+    assert wanted[43017].alias == "AO-91"  # OSCAR number preferred over FOX-1B
+    so50 = wanted[27607].transmitters[0]
     assert so50.kind == FM and so50.uplink == 145850000 and so50.downlink == 436795000 and so50.ctcss == 67.0
 
 
@@ -73,11 +73,11 @@ async def test_satnogs_reused_for_a_day_unless_forced():
     prev.tx_fetched_at = S.utcnow() - timedelta(hours=5)
     http = FakeHttp()
     cat = await S.fetch_catalog(http, prev)
-    assert not any("satnogs" in url for url, _ in http.calls) and len(cat.satellites) == 4
+    assert not any("satnogs.org/api/trans" in url for url, _ in http.calls) and len(cat.satellites) == 4
     assert cat.tx_fetched_at == prev.tx_fetched_at
     http = FakeHttp()
     await S.fetch_catalog(http, prev, force=True)
-    assert any("satnogs" in url for url, _ in http.calls)
+    assert any("satnogs.org/api/trans" in url for url, _ in http.calls)
 
 
 async def test_fetch_failures():
@@ -92,6 +92,57 @@ async def test_fetch_failures():
     # CelesTrak down is always an error (the caller keeps its saved copy)
     with pytest.raises(FetchError):
         await S.fetch_catalog(FakeHttp({"celestrak.org": FetchError("down")}), prev)
+
+
+# SO-131: narrow-FM repeater, six-digit catalog number, TLE only on SatNOGS (Alpha-5)
+SO131_TX = {"sat_id": "AZNB-1972-1511-6151-8557", "norad_cat_id": 98205, "norad_follow_id": 101101, "alive": True,
+            "mode": "FMN", "uplink_mode": "FMN", "uplink_low": 145925000, "downlink_low": 436888000,
+            "description": "Mode V/U - FM Repeater (Voice)"}
+SO131_SAT = {"sat_id": "AZNB-1972-1511-6151-8557", "name": "UNNE-1B", "names": "HADES-E2, SO-131"}
+SO131_TLE = [{"tle0": "0 UNNE-1B", "sat_id": "AZNB-1972-1511-6151-8557", "norad_cat_id": 98205,
+              "tle1": "1 A1101U 26227CP  26327.13631616  .00009579  00000-0  45653-3 0  9995",
+              "tle2": "2 A1101  97.4371  35.8054 0002264  66.6484 293.4989 15.19317022  7955"}]
+CAS3H_SAT = {"sat_id": "AHVS-7983-8710-8819-8034", "name": "LILACSAT 2", "names": "CAS-3H XW-2H"}
+
+
+def test_catalog_number_alpha5():
+    assert S.catalog_number("25544") == 25544 and S.catalog_number("A1101") == 101101
+    assert S.catalog_number("J0000") == 180000 and S.catalog_number("Z9999") == 339999  # I and O skipped
+    assert S.catalog_number("I0000") is None and S.catalog_number("") is None
+    assert list(S.parse_tles("UNNE-1B\n" + SO131_TLE[0]["tle1"] + "\n" + SO131_TLE[0]["tle2"])) == [101101]
+
+
+def test_select_narrow_fm_and_six_digit_norad():
+    sats = [SO131_SAT]
+    wanted = S.select([SO131_TX], S.display_names(sats), S.all_names(sats))
+    w = wanted[101101]
+    assert w.alias == "SO-131" and w.transmitters[0].kind == FM and w.names == ["UNNE-1B", "HADES-E2", "SO-131"]
+    assert S.norad_of({"norad_cat_id": 98205, "norad_follow_id": None}) is None  # still a temporary ID
+    assert S.all_names([CAS3H_SAT])[CAS3H_SAT["sat_id"]] == ["LILACSAT 2", "CAS-3H XW-2H", "CAS-3H", "XW-2H"]
+
+
+async def test_satnogs_tle_fallback():
+    tx = load("satnogs_transmitters.json") + [SO131_TX]
+    sats = load("satnogs_satellites.json") + [SO131_SAT]
+    http = FakeHttp({"api/transmitters": tx, "api/satellites": sats, "api/tle": SO131_TLE})
+    cat = await S.fetch_catalog(http)
+    so131 = next(s for s in cat.satellites if s.norad == 101101)
+    assert so131.short_name == "SO-131" and so131.sat_id == SO131_TX["sat_id"]
+    obs = orbit.Observer(CLT.lat, CLT.lon)
+    assert -90 <= orbit.look(so131, obs, datetime(2026, 11, 23, 12, tzinfo=timezone.utc)).el <= 90
+    assert any(p and p.get("sat_id") == SO131_TX["sat_id"] for url, p in http.calls if "api/tle" in url)
+
+
+def test_tracked_filter():
+    sats = fixture_sats()
+    sats[40908] = S.Satellite(40908, "LILACSAT-2", "", "", names=["LILACSAT 2", "CAS-3H XW-2H", "CAS-3H"])
+    cat = Catalog(list(sats.values()))
+    assert S.tracked(cat, []) is cat
+    out = S.tracked(cat, ["so 50", "iss", "cas-3h", "43017", "NOPE-1"])
+    assert [s.norad for s in out.satellites] == [27607, 25544, 40908, 43017]  # in the order given
+    assert out.satellites[2].short_name == "CAS-3H"  # shown by the name it's tracked as
+    assert cat.satellites[-1].short_name == "LILACSAT-2"  # ...without touching the full catalog
+    assert S.not_found(cat, ["ISS", "NOPE-1"]) == ["NOPE-1"]
 
 
 def test_is_due():
@@ -191,7 +242,28 @@ def test_sat_settings_round_trip_and_clamp(tmp_path):
     assert Config.load(tmp_path / "c.toml").sats == SatSettings(True, 2.0, 0.0)
 
 
+def test_sat_track_list_round_trip(tmp_path):
+    cfg = Config(path=tmp_path / "c.toml")
+    cfg.sats.track = ["ISS", "SO-50", "CAS-3H", 'odd "name"']
+    cfg.save()
+    assert Config.load(tmp_path / "c.toml").sats.track == ["ISS", "SO-50", "CAS-3H", 'odd "name"']
+    (tmp_path / "c.toml").write_text('[sats]\ntrack = ["ISS", 27607, "", true]\n')
+    assert Config.load(tmp_path / "c.toml").sats.track == ["ISS", "27607"]
+
+
 # ── app ───────────────────────────────────────────────────────────────────────
+async def test_app_shows_only_tracked_satellites(tmp_path):
+    app = make_app(tmp_path)
+    app.config.sats.track = ["SO-50", "ISS", "AO-123"]
+    async with app.run_test(size=(160, 50)) as pilot:
+        await settle(pilot, app)
+        assert [s.short_name for s in app.sats.catalog.satellites] == ["SO-50", "ISS"]
+        assert set(app.sats.passes) <= {27607, 25544}
+        assert app._sat_missing == ["AO-123"]  # not in the fixture catalog: the user is told
+    # the saved copy keeps everything, so changing the list later needs no download
+    assert len(S.load_cache(tmp_path / "sats.json").satellites) == 4
+
+
 async def test_app_loads_satellites_and_tracker(tmp_path):
     http = FakeHttp()
     app = make_app(tmp_path, http=http)

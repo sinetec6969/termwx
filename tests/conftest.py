@@ -58,6 +58,7 @@ ROUTES = [
     ("10cm-flux.json", "f107.json"),
     ("products/alerts.json", "swpc_alerts.json"),
     ("ovation_aurora_latest.json", "aurora.json"),
+    ("prop.kc2g.com/api/stations.json", "kc2g_stations.json"),
     ("aviationweather.gov/api/data/stationinfo", "awc_stationinfo.json"),
     ("aviationweather.gov/api/data/airport", "awc_airport.json"),
     ("aviationweather.gov/api/data/metar", "awc_metar.json"),
@@ -76,6 +77,7 @@ ROUTES = [
     ("db.satnogs.org/api/satellites", "satnogs_satellites.json"),
 ]
 TEXT_ROUTES = [
+    ("drap_global_frequencies.txt", "drap_global_frequencies.txt"),
     ("aviationweather.gov/api/data/windtemp", "awc_windtemp_us.txt"),
     ("tfr.faa.gov/download/detail_6_9169.xml", "faa_tfr_detail_6_9169.xml"),
     ("tfr.faa.gov/download/detail_6_4348.xml", "faa_tfr_detail_6_4348.xml"),
