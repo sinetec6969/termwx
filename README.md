@@ -9,11 +9,12 @@ go/no-go checklist, and — as of roughly hour 38 of being awake — a gpredict-
 for FM repeater and APRS amateur satellites. no API keys. (NOTAMs are opt-in. we'll get there.
 everything is fine.)
 
-![termwx dashboard showing current conditions, the night sky, hourly graph, 3-day forecast, an alert banner, and the aviation, drone go/no-go and space weather panels](docs/screenshot.png)
+![termwx dashboard showing current conditions, the sky, hourly graph, 3-day forecast, an alert banner, and the aviation, drone go/no-go, satellite pass and space weather panels, including HF MUF/LUF](docs/screenshot.png)
 
-<sub>Live data for Charlotte, NC on an October evening, launched with <code>--demo-alert</code> to show the alert banner.
-The drone panel reads NO-GO because it is after dark and the demo includes a Severe Thunderstorm Warning.
-(it was right. i did not fly the drone. i made more coffee.)</sub>
+<sub>Live data for Charlotte, NC on an overcast November afternoon, launched with <code>--demo-alert</code> to show the alert banner.
+The drone panel reads NO-GO because the demo includes a Severe Thunderstorm Warning and a demo TFR right on top of us.
+the satellite panel is tracking just five birds, and down in space weather 80 through 12 meters are open.
+(i did not get on the air. i made more coffee.)</sub>
 
 ## Install
 
