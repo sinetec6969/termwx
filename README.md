@@ -411,6 +411,9 @@ fueled by drip coffee, gas station espresso, and a pack of something i said i qu
 
 ## Project status
 
+**Version 0.4.1** makes the "Next hours" graph fill its whole panel on wide terminals (it
+used to give up about two-thirds of the way across. relatable).
+
 **Version 0.4.0** added, at an hour i will not disclose:
 - the FM/APRS amateur satellite tracker (`o`), with TLE auto-reload and a force-update button,
   plus a `track` list so it only shows the birds you actually work;
@@ -420,7 +423,7 @@ fueled by drip coffee, gas station espresso, and a pack of something i said i qu
 **Version 0.3.0** added TFRs from the FAA (no key), opt-in NOTAMs from the FAA NOTAM
 Management Service, and the Linux/macOS installer with `termwx setup`.
 
-everything listed above is implemented. all 228 tests pass against recorded fixtures (i ran
+everything listed above is implemented. all 233 tests pass against recorded fixtures (i ran
 them four times. not because they failed. because i didn't believe it). the app has been run
 against the live services for Charlotte, Denver and Tampa, and the drone checklist for
 Charlotte, Cheyenne and Seattle.
