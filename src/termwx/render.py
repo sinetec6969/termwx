@@ -191,6 +191,10 @@ def hourly_panel(w: Weather, width: int = 80) -> RenderableType:
     hours = w.hours[:n]
     if not hours:
         return Text("no hourly data", style=DIM)
+    # stretch the columns so the graph spans the whole panel, spreading the remainder evenly
+    widths = [(i + 1) * avail // n - i * avail // n for i in range(n)]
+    avg = avail / n
+    step = 4 if avg < 3 else 3 if avg < 4.5 else 2 if avg < 9 else 1  # a label every ~8+ columns
     temps = [h.temp for h in hours]
     lo, hi = min(temps), max(temps)
     span = (hi - lo) or 1
@@ -199,8 +203,8 @@ def hourly_panel(w: Weather, width: int = 80) -> RenderableType:
 
     glyph_row, label_row, time_row, rain_row = Text(), Text(), Text(), Text()
     graph = [Text() for _ in range(rows_h)]
-    step = 3 if cw == 3 else 4
     for i, h in enumerate(hours):
+        cw = widths[i]
         color = U.temp_color(h.temp, u)
         lvl = max(1, round((h.temp - lo) / span * (levels - 4)) + 3)
         for r in range(rows_h):
@@ -214,11 +218,12 @@ def hourly_panel(w: Weather, width: int = 80) -> RenderableType:
             if day and day.sunrise and day.sunset:
                 is_day = day.sunrise <= h.time < day.sunset
         if marker:
+            lw = sum(widths[i : i + step])
             g, gc = wmo.glyph(h.code, is_day)
-            glyph_row.append(g.ljust(cw * step)[: cw * step], style=gc)
-            label_row.append(U.temp(h.temp, u).ljust(cw * step)[: cw * step], style=f"bold {color}")
+            glyph_row.append(g.ljust(lw)[:lw], style=gc)
+            label_row.append(U.temp(h.temp, u).ljust(lw)[:lw], style=f"bold {color}")
             tlabel = "now" if i == 0 else (hhmm(h.time, short=True) if h.time.hour else h.time.strftime("%a"))
-            time_row.append(tlabel.ljust(cw * step)[: cw * step], style=LABEL if h.time.hour else f"bold {ACCENT}")
+            time_row.append(tlabel.ljust(lw)[:lw], style=LABEL if h.time.hour else f"bold {ACCENT}")
         p = h.precip_prob
         if p >= 60:
             rc = "#3d9df3"

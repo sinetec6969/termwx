@@ -401,6 +401,15 @@ def test_scene_dimensions(scene, is_day):
         assert len(lines) == 9 and all(len(line) == 30 for line in lines)
 
 
+@pytest.mark.parametrize("width", [40, 80, 108, 150, 200])
+def test_hourly_graph_fills_the_panel(width):
+    w = openmeteo.parse_forecast(load("openmeteo.json"), CLT, U.IMPERIAL, load("aqi.json"))
+    console = Console(width=width, record=True, color_system=None)
+    console.print(R.hourly_panel(w, width))
+    bars = console.export_text().splitlines()[4]  # bottom row of the temperature graph
+    assert len(bars.rstrip()) == width
+
+
 @pytest.mark.parametrize("width", [30, 50, 80, 140])
 async def test_renderers_at_widths(width):
     w = openmeteo.parse_forecast(load("openmeteo.json"), CLT, U.IMPERIAL, load("aqi.json"))
