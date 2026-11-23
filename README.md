@@ -411,15 +411,16 @@ fueled by drip coffee, gas station espresso, and a pack of something i said i qu
 
 ## Project status
 
-**Version 0.3.0** added three things to the 0.2 aviation console and drone checklist:
-- TFRs from the FAA, no key needed;
-- opt-in NOTAMs from the FAA NOTAM Management Service;
-- the Linux/macOS installer with `termwx setup`.
+**Version 0.4.0** added, at an hour i will not disclose:
+- the FM/APRS amateur satellite tracker (`o`), with TLE auto-reload and a force-update button,
+  plus a `track` list so it only shows the birds you actually work;
+- HF propagation in the space weather panel: MUF and foF2 from nearby ionosondes, an
+  estimated LUF, and which ham bands are open.
 
-and then, since 0.3.0, on `master`, at an hour i will not disclose:
-- the FM/APRS amateur satellite tracker (`o`), with TLE auto-reload and a force-update button.
+**Version 0.3.0** added TFRs from the FAA (no key), opt-in NOTAMs from the FAA NOTAM
+Management Service, and the Linux/macOS installer with `termwx setup`.
 
-everything listed above is implemented. all 216 tests pass against recorded fixtures (i ran
+everything listed above is implemented. all 228 tests pass against recorded fixtures (i ran
 them four times. not because they failed. because i didn't believe it). the app has been run
 against the live services for Charlotte, Denver and Tampa, and the drone checklist for
 Charlotte, Cheyenne and Seattle.
@@ -443,7 +444,9 @@ Charlotte, Cheyenne and Seattle.
 | TFRs: aviation screen, summary count, drone check, `--once --aviation` | done (new in 0.3) |
 | Installer (`install.sh`) and `termwx setup` | done (new in 0.3); tested on Linux (bash, dash, zsh); not yet run on macOS or under fish |
 | NOTAMs via FAA NMS | done, opt-in through environment variables; not yet verified against a live NMS response |
-| Satellite tracker (`o`): FM/APRS list, live az/el, Doppler, passes, sky plot, TLE refresh | done (new since 0.3); checked headless against live data, not yet hammered in an interactive terminal |
+| Satellite tracker (`o`): FM/APRS list, live az/el, Doppler, passes, sky plot, TLE refresh | done (new in 0.4); checked headless against live data, not yet hammered in an interactive terminal |
+| Satellite `track` list, Alpha-5 catalog numbers, SatNOGS TLE fallback | done (new in 0.4) |
+| HF MUF / foF2 / LUF and open bands in the space weather panel | done (new in 0.4); LUF is an estimate, MUF needs an ionosonde within 2000 km |
 
 ### Known limitations
 
